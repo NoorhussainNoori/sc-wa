@@ -1,0 +1,145 @@
+import { useEffect, useState } from "react";
+import { apiFetch, extractListData, extractPaginationMeta } from "../api.js";
+import Field from "../components/Field.jsx";
+import PaginationControls from "../components/PaginationControls.jsx";
+
+const emptyTeacher = {
+  name: "",
+  father_name: "",
+  phone: "",
+  email: "",
+  address: "",
+  salary: "",
+  department: "",
+};
+
+export default function Teachers() {
+  const PAGE_SIZE = 10;
+  const [teachers, setTeachers] = useState([]);
+  const [teachersPage, setTeachersPage] = useState(1);
+  const [teachersMeta, setTeachersMeta] = useState({
+    count: 0,
+    next: null,
+    previous: null,
+  });
+  const [form, setForm] = useState(emptyTeacher);
+  const [error, setError] = useState("");
+
+  const loadTeachers = async (page = 1) => {
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        page_size: String(PAGE_SIZE),
+      });
+      const data = await apiFetch(`/teachers/?${params.toString()}`);
+      setTeachers(extractListData(data));
+      setTeachersMeta(extractPaginationMeta(data));
+      setTeachersPage(page);
+    } catch (err) {
+      setError(err.message || "Failed to load teachers.");
+    }
+  };
+
+  useEffect(() => {
+    const run = async () => {
+      await loadTeachers(teachersPage);
+    };
+    void run();
+  }, []);
+
+  const onChange = (field) => (event) => {
+    setForm((prev) => ({ ...prev, [field]: event.target.value }));
+  };
+
+  const onSubmit = async (event) => {
+    event.preventDefault();
+    setError("");
+    try {
+      await apiFetch("/teachers/", {
+        method: "POST",
+        body: JSON.stringify(form),
+      });
+      setForm(emptyTeacher);
+      await loadTeachers();
+    } catch (err) {
+      setError(err.message || "Failed to create teacher.");
+    }
+  };
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <div>
+          <h2>Teachers</h2>
+          <p>Register teachers and track salaries.</p>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>New Teacher</h3>
+        <form className="form-grid" onSubmit={onSubmit}>
+          <Field label="Name">
+            <input className="input" value={form.name} onChange={onChange("name")} required />
+          </Field>
+          <Field label="Father Name">
+            <input className="input" value={form.father_name} onChange={onChange("father_name")} required />
+          </Field>
+          <Field label="Phone">
+            <input className="input" value={form.phone} onChange={onChange("phone")} required />
+          </Field>
+          <Field label="Email">
+            <input className="input" value={form.email} onChange={onChange("email")} required />
+          </Field>
+          <Field label="Address">
+            <input className="input" value={form.address} onChange={onChange("address")} required />
+          </Field>
+          <Field label="Salary">
+            <input className="input" value={form.salary} onChange={onChange("salary")} required />
+          </Field>
+          <Field label="Department">
+            <input className="input" value={form.department} onChange={onChange("department")} required />
+          </Field>
+          <button className="button button-primary" type="submit">
+            Save Teacher
+          </button>
+        </form>
+        {error ? <div className="form-error">{error}</div> : null}
+      </div>
+
+      <div className="panel">
+        <h3>Teacher List</h3>
+        <div className="table">
+          <div className="table-head">
+            <div>ID</div>
+            <div>Name</div>
+            <div>Father</div>
+            <div>Phone</div>
+            <div>Email</div>
+            <div>Department</div>
+            <div>Salary</div>
+          </div>
+          {teachers.map((teacher) => (
+            <div className="table-row" key={teacher.id}>
+              <div>{teacher.id}</div>
+              <div>{teacher.name}</div>
+              <div>{teacher.father_name}</div>
+              <div>{teacher.phone}</div>
+              <div>{teacher.email}</div>
+              <div>{teacher.department}</div>
+              <div>{teacher.salary}</div>
+            </div>
+          ))}
+        </div>
+        <PaginationControls
+          count={teachersMeta.count}
+          currentPage={teachersPage}
+          pageSize={PAGE_SIZE}
+          hasPrevious={Boolean(teachersMeta.previous)}
+          hasNext={Boolean(teachersMeta.next)}
+          onPrevious={() => loadTeachers(Math.max(1, teachersPage - 1))}
+          onNext={() => loadTeachers(teachersPage + 1)}
+        />
+      </div>
+    </div>
+  );
+}
