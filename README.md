@@ -29,3 +29,47 @@ This is a full-stack app:
 
 - Backend: `python backend/manage.py test`
 
+## Docker Deployment (Mac mini / Production-style)
+
+This Docker setup uses **PostgreSQL** and can run with **zero manual config**.
+
+### Quick start (no setup needed)
+
+From project root:
+
+- `docker compose up -d --build`
+
+Frontend will be available at:
+- [http://localhost:8080](http://localhost:8080)
+
+This automatically:
+- starts PostgreSQL
+- creates/uses DB and user (default values)
+- runs Django migrations
+- collects static files
+- starts backend + frontend
+
+### Optional: set your own secrets/hosts
+
+If you want custom values, create root `.env` (optional):
+
+```bash
+cp backend/.env.docker.example .env
+```
+
+Then update values (especially `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD`, `DJANGO_ALLOWED_HOSTS`) and restart:
+
+- `docker compose up -d --build`
+
+### Useful commands
+
+- See logs: `docker compose logs -f`
+- Restart: `docker compose restart`
+- Stop: `docker compose down`
+- Stop and remove volumes (danger: deletes postgres data): `docker compose down -v`
+
+### Notes
+
+- PostgreSQL data persists in Docker volume `school_rasool_pgdata`.
+- Static files are collected automatically on backend container start.
+- Frontend calls backend through nginx reverse proxy at `/api`.
