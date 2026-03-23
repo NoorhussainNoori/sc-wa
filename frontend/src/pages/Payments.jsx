@@ -3,16 +3,20 @@ import { apiFetch, extractListData, extractPaginationMeta } from "../api.js";
 import Field from "../components/Field.jsx";
 import PaginationControls from "../components/PaginationControls.jsx";
 
-const emptyPayment = {
+const emptyPaymentItem = {
   fee_type: "",
-  bill_number: "",
   amount: "",
+  other_reason: "",
+};
+
+const emptyPayment = {
+  bill_number: "",
   date_shamsi: "",
   date_year: "",
   date_month: "",
   date_day: "",
-  other_reason: "",
   notes: "",
+  items: [{ ...emptyPaymentItem }],
 };
 
 export default function Payments() {
@@ -37,6 +41,9 @@ export default function Payments() {
   });
   const [form, setForm] = useState(emptyPayment);
   const [error, setError] = useState("");
+  const [searchingStudents, setSearchingStudents] = useState(false);
+  const [loadingPayments, setLoadingPayments] = useState(false);
+  const [savingPayments, setSavingPayments] = useState(false);
 
   const loadFeeTypes = async () => {
     try {
@@ -58,6 +65,7 @@ export default function Payments() {
 
   const searchStudents = async (page = 1) => {
     setError("");
+    setSearchingStudents(true);
     try {
       const params = new URLSearchParams({
         q: search,
@@ -70,10 +78,13 @@ export default function Payments() {
       setStudentsPage(page);
     } catch (err) {
       setError(err.message || "Failed to search students.");
+    } finally {
+      setSearchingStudents(false);
     }
   };
 
   const loadPayments = async (studentId, page = 1) => {
+    setLoadingPayments(true);
     try {
       const params = new URLSearchParams({
         student_id: String(studentId),
@@ -86,6 +97,8 @@ export default function Payments() {
       setPaymentsPage(page);
     } catch (err) {
       setError(err.message || "Failed to load payments.");
+    } finally {
+      setLoadingPayments(false);
     }
   };
 
@@ -103,12 +116,40 @@ export default function Payments() {
   const onSelectStudent = (student) => {
     setSelectedStudent(student);
     loadPayments(student.id, 1);
-    if (form.fee_type) {
-      const nextAmount = deriveFeeAmount(student, form.fee_type);
-      if (nextAmount) {
-        setForm((prev) => ({ ...prev, amount: nextAmount }));
+  };
+
+  const onItemChange = (index, field) => (event) => {
+    const value = event.target.value;
+    setForm((prev) => {
+      const items = [...prev.items];
+      items[index] = { ...items[index], [field]: value };
+      return { ...prev, items };
+    });
+  };
+
+  const onItemFeeTypeChange = (index) => (event) => {
+    const nextFeeType = event.target.value;
+    setForm((prev) => {
+      const items = [...prev.items];
+      const item = { ...items[index], fee_type: nextFeeType };
+      if (selectedStudent) {
+        const nextAmount = deriveFeeAmount(selectedStudent, nextFeeType);
+        if (nextAmount) item.amount = String(nextAmount);
       }
-    }
+      items[index] = item;
+      return { ...prev, items };
+    });
+  };
+
+  const addPaymentItem = () => {
+    setForm((prev) => ({ ...prev, items: [...prev.items, { ...emptyPaymentItem }] }));
+  };
+
+  const removePaymentItem = (index) => {
+    setForm((prev) => {
+      const items = prev.items.filter((_, i) => i !== index);
+      return { ...prev, items: items.length ? items : [{ ...emptyPaymentItem }] };
+    });
   };
 
   const onSubmit = async (event) => {
@@ -118,35 +159,56 @@ export default function Payments() {
       return;
     }
     setError("");
+    setSavingPayments(true);
     try {
       const dateShamsi = buildDateShamsi(form.date_year, form.date_month, form.date_day);
-      await apiFetch("/payments/", {
-        method: "POST",
-        body: JSON.stringify({
-          ...form,
-          date_shamsi: dateShamsi,
-          student: selectedStudent.id,
-        }),
-      });
+      const itemsToSubmit = form.items.filter((item) => item.fee_type && item.amount);
+      if (!itemsToSubmit.length) {
+        setError("Add at least one valid fee type and amount.");
+        return;
+      }
+
+      const submittedItems = [];
+      for (const item of itemsToSubmit) {
+        await apiFetch("/payments/", {
+          method: "POST",
+          body: JSON.stringify({
+            bill_number: form.bill_number,
+            amount: item.amount,
+            date_shamsi: dateShamsi,
+            student: selectedStudent.id,
+            fee_type: item.fee_type,
+            other_reason: item.other_reason || "",
+            notes: form.notes || "",
+          }),
+        });
+
+        const typeEntry = feeTypes.find((type) => String(type.id) === String(item.fee_type));
+        submittedItems.push({
+          fee_type_name: typeEntry?.name || item.fee_type,
+          amount: item.amount,
+          other_reason: item.other_reason || "",
+        });
+      }
+
       setForm(emptyPayment);
       await loadPayments(selectedStudent.id, paymentsPage);
       printReceipt({
         student: selectedStudent,
-        feeType: feeTypes.find((type) => String(type.id) === String(form.fee_type)),
         classInfo: classes.find((cls) => cls.id === selectedStudent.school_class),
-        payment: {
-          ...form,
+        paymentHeader: {
+          bill_number: form.bill_number,
           date_shamsi: dateShamsi,
+          notes: form.notes || "",
         },
+        items: submittedItems,
       });
     } catch (err) {
       setError(err.message || "Failed to save payment.");
+    } finally {
+      setSavingPayments(false);
     }
   };
-
-  const selectedFeeType = feeTypes.find(
-    (type) => String(type.id) === String(form.fee_type)
-  );
 
   const deriveFeeAmount = (student, feeTypeId) => {
     const classEntry = classes.find((cls) => cls.id === student?.school_class);
@@ -176,10 +238,10 @@ export default function Payments() {
             className="input"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Name, father, grandfather, phone, bill..."
+            placeholder="Name, registration number, father, grandfather, phone..."
           />
-          <button className="button button-outline" onClick={() => searchStudents(1)}>
-            Search
+          <button className="button button-outline" onClick={() => searchStudents(1)} disabled={searchingStudents}>
+            {searchingStudents ? "Searching..." : "Search"}
           </button>
         </div>
         <div className="pill-list">
@@ -190,10 +252,15 @@ export default function Payments() {
               onClick={() => onSelectStudent(student)}
               type="button"
             >
-              {student.name} - {student.father_name}
+              {student.name} ({student.registration_number || "No Reg"}) - {student.father_name}
             </button>
           ))}
         </div>
+        {!searchingStudents && students.length === 0 ? (
+          <div className="muted-panel" style={{ marginTop: 12 }}>
+            No students found.
+          </div>
+        ) : null}
         <PaginationControls
           count={studentsMeta.count}
           currentPage={studentsPage}
@@ -212,7 +279,9 @@ export default function Payments() {
             <input
               className="input"
               value={
-                selectedStudent ? `${selectedStudent.name} (${selectedStudent.father_name})` : ""
+                selectedStudent
+                  ? `${selectedStudent.name} (${selectedStudent.registration_number || "No Reg"})`
+                  : ""
               }
               readOnly
               placeholder="Select a student above"
@@ -235,35 +304,8 @@ export default function Payments() {
               placeholder="Select a student above"
             />
           </Field>
-          <Field label="Fee Type">
-            <select
-              className="input"
-              value={form.fee_type}
-              onChange={(event) => {
-                const nextFeeType = event.target.value;
-                setForm((prev) => ({ ...prev, fee_type: nextFeeType }));
-                if (selectedStudent) {
-                  const nextAmount = deriveFeeAmount(selectedStudent, nextFeeType);
-                  if (nextAmount) {
-                    setForm((prev) => ({ ...prev, fee_type: nextFeeType, amount: nextAmount }));
-                  }
-                }
-              }}
-              required
-            >
-              <option value="">Select type</option>
-              {feeTypes.map((type) => (
-                <option key={type.id} value={type.id}>
-                  {type.name}
-                </option>
-              ))}
-            </select>
-          </Field>
           <Field label="Bill Number">
             <input className="input" value={form.bill_number} onChange={onChange("bill_number")} required />
-          </Field>
-          <Field label="Amount">
-            <input className="input" value={form.amount} onChange={onChange("amount")} required />
           </Field>
           <Field label="Shamsi Year">
             <input
@@ -310,17 +352,6 @@ export default function Payments() {
               })}
             </select>
           </Field>
-          {selectedFeeType?.requires_reason ? (
-            <Field label="Other Reason">
-              <input
-                className="input"
-                value={form.other_reason}
-                onChange={onChange("other_reason")}
-                placeholder="Reason for this payment"
-                required
-              />
-            </Field>
-          ) : null}
           <Field label="Notes">
             <input
               className="input"
@@ -329,10 +360,73 @@ export default function Payments() {
               placeholder="Optional notes"
             />
           </Field>
-          <button className="button button-primary" type="submit">
-            Save Payment
+          <button className="button button-primary" type="submit" disabled={savingPayments}>
+            {savingPayments ? "Saving..." : "Save Payment"}
           </button>
         </form>
+        <div className="panel" style={{ marginTop: 12 }}>
+          <h4>Fee Items (Multiple allowed)</h4>
+          <div className="table">
+            <div className="table-head">
+              <div>Fee Type</div>
+              <div>Amount</div>
+              <div>Other Reason</div>
+              <div>Action</div>
+            </div>
+            {form.items.map((item, index) => {
+              const selectedType = feeTypes.find((type) => String(type.id) === String(item.fee_type));
+              return (
+                <div className="table-row" key={`item-${index}`}>
+                  <div>
+                    <select
+                      className="input"
+                      value={item.fee_type}
+                      onChange={onItemFeeTypeChange(index)}
+                      required
+                    >
+                      <option value="">Select type</option>
+                      {feeTypes.map((type) => (
+                        <option key={type.id} value={type.id}>
+                          {type.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <input
+                      className="input"
+                      value={item.amount}
+                      onChange={onItemChange(index, "amount")}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <input
+                      className="input"
+                      value={item.other_reason}
+                      onChange={onItemChange(index, "other_reason")}
+                      placeholder={selectedType?.requires_reason ? "Required for this type" : "Optional"}
+                      required={Boolean(selectedType?.requires_reason)}
+                    />
+                  </div>
+                  <div>
+                    <button
+                      className="button button-outline"
+                      type="button"
+                      onClick={() => removePaymentItem(index)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <button className="button button-outline" type="button" onClick={addPaymentItem}>
+            Add Another Fee Type
+          </button>
+        </div>
+        {loadingPayments ? <div className="status-message">Loading payment history...</div> : null}
         {error ? <div className="form-error">{error}</div> : null}
       </div>
 
@@ -347,11 +441,10 @@ export default function Payments() {
             <div>Reason</div>
           </div>
           {payments.map((payment) => {
-            const typeEntry = feeTypes.find((type) => type.id === payment.fee_type);
             return (
             <div className="table-row" key={payment.id}>
               <div>{payment.id}</div>
-              <div>{typeEntry ? typeEntry.name : payment.fee_type}</div>
+              <div>{payment.fee_type_name || payment.fee_type}</div>
               <div>{payment.amount}</div>
               <div>{payment.date_shamsi}</div>
               <div>{payment.other_reason || "—"}</div>
@@ -359,6 +452,11 @@ export default function Payments() {
             );
           })}
         </div>
+        {!loadingPayments && payments.length === 0 ? (
+          <div className="muted-panel" style={{ marginTop: 12 }}>
+            No payment records found.
+          </div>
+        ) : null}
         <PaginationControls
           count={paymentsMeta.count}
           currentPage={paymentsPage}
@@ -380,7 +478,7 @@ function buildDateShamsi(year, month, day) {
   return `${year}-${month}-${day}`;
 }
 
-function printReceipt({ student, feeType, classInfo, payment }) {
+function printReceipt({ student, classInfo, paymentHeader, items }) {
   const RECEIPT_TEMPLATE_KEY = "receipt_template_config_v1";
 
   const escapeHtml = (value) => {
@@ -474,13 +572,26 @@ function printReceipt({ student, feeType, classInfo, payment }) {
         <div class="divider"></div>
           <div class="box">
           <div class="row"><span>Student</span><strong>${escapeHtml(student?.name || "")}</strong></div>
+          <div class="row"><span>Registration No</span><strong>${escapeHtml(student?.registration_number || "-")}</strong></div>
           <div class="row"><span>Father</span><strong>${escapeHtml(student?.father_name || "")}</strong></div>
           <div class="row"><span>Class</span><strong>${classInfo ? escapeHtml(`${classInfo.name} (${classInfo.year_shamsi})`) : ""}</strong></div>
-          <div class="row"><span>Bill No</span><strong>${escapeHtml(payment?.bill_number || "")}</strong></div>
-          <div class="row"><span>Fee Type</span><strong>${escapeHtml(feeType?.name || "")}</strong></div>
-          <div class="row"><span>Date (Shamsi)</span><strong>${escapeHtml(payment?.date_shamsi || "")}</strong></div>
-          <div class="row"><span>Amount</span><strong class="total">${escapeHtml(payment?.amount || "")}</strong></div>
-          <div class="row"><span>Reason</span><strong>${escapeHtml(payment?.other_reason || "-")}</strong></div>
+          <div class="row"><span>Bill No</span><strong>${escapeHtml(paymentHeader?.bill_number || "")}</strong></div>
+          <div class="row"><span>Date (Shamsi)</span><strong>${escapeHtml(paymentHeader?.date_shamsi || "")}</strong></div>
+          <div class="row"><span>Notes</span><strong>${escapeHtml(paymentHeader?.notes || "-")}</strong></div>
+          <div class="divider"></div>
+          ${items
+            .map(
+              (item) => `
+            <div class="row"><span>Fee Type</span><strong>${escapeHtml(item.fee_type_name)}</strong></div>
+            <div class="row"><span>Amount</span><strong>${escapeHtml(item.amount)}</strong></div>
+            <div class="row"><span>Reason</span><strong>${escapeHtml(item.other_reason || "-")}</strong></div>
+            <div class="divider"></div>
+          `
+            )
+            .join("")}
+          <div class="row"><span>Total</span><strong class="total">${escapeHtml(
+            items.reduce((sum, item) => sum + Number(item.amount || 0), 0)
+          )}</strong></div>
         </div>
         <div class="muted" style="margin-top: 16px;">Generated by School Finance System</div>
         <div class="muted" style="margin-top: 8px; font-weight: 600; color:#475569;">${escapeHtml(

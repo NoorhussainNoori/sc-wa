@@ -319,6 +319,12 @@
   font-weight: 500;
 }
 
+.status-message {
+  margin-top: 10px;
+  color: #2563eb;
+  font-weight: 500;
+}
+
 .pill-list {
   display: flex;
   flex-wrap: wrap;
@@ -433,6 +439,46 @@
   gap: 10px;
   font-size: 0.9rem;
   color: var(--muted);
+}
+
+.kpi-list {
+  display: grid;
+  gap: 10px;
+}
+
+.kpi-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.kpi-good {
+  color: #16a34a;
+}
+
+.kpi-bad {
+  color: #dc2626;
+}
+
+.mini-list {
+  display: grid;
+  gap: 8px;
+}
+
+.mini-list-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
 }
 
 .auth-shell {

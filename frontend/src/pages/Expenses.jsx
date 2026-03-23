@@ -24,6 +24,9 @@ export default function Expenses() {
   const [categoryName, setCategoryName] = useState("");
   const [form, setForm] = useState(emptyExpense);
   const [error, setError] = useState("");
+  const [loadingExpenses, setLoadingExpenses] = useState(false);
+  const [savingExpense, setSavingExpense] = useState(false);
+  const [savingCategory, setSavingCategory] = useState(false);
 
   const loadCategories = async () => {
     try {
@@ -35,6 +38,7 @@ export default function Expenses() {
   };
 
   const loadExpenses = async (page = 1) => {
+    setLoadingExpenses(true);
     try {
       const params = new URLSearchParams({
         page: String(page),
@@ -46,6 +50,8 @@ export default function Expenses() {
       setExpensesPage(page);
     } catch (err) {
       setError(err.message || "Failed to load expenses.");
+    } finally {
+      setLoadingExpenses(false);
     }
   };
 
@@ -59,6 +65,7 @@ export default function Expenses() {
   const createCategory = async () => {
     setError("");
     if (!categoryName.trim()) return;
+    setSavingCategory(true);
     try {
       await apiFetch("/expense-categories/", {
         method: "POST",
@@ -68,6 +75,8 @@ export default function Expenses() {
       await loadCategories();
     } catch (err) {
       setError(err.message || "Failed to create category.");
+    } finally {
+      setSavingCategory(false);
     }
   };
 
@@ -78,6 +87,7 @@ export default function Expenses() {
   const onSubmit = async (event) => {
     event.preventDefault();
     setError("");
+    setSavingExpense(true);
     try {
       await apiFetch("/expenses/", {
         method: "POST",
@@ -87,6 +97,8 @@ export default function Expenses() {
       await loadExpenses(expensesPage);
     } catch (err) {
       setError(err.message || "Failed to save expense.");
+    } finally {
+      setSavingExpense(false);
     }
   };
 
@@ -108,8 +120,8 @@ export default function Expenses() {
             onChange={(event) => setCategoryName(event.target.value)}
             placeholder="New category name"
           />
-          <button className="button button-outline" onClick={createCategory}>
-            Add Category
+          <button className="button button-outline" onClick={createCategory} disabled={savingCategory}>
+            {savingCategory ? "Adding..." : "Add Category"}
           </button>
         </div>
         <div className="pill-list">
@@ -119,6 +131,11 @@ export default function Expenses() {
             </span>
           ))}
         </div>
+        {categories.length === 0 ? (
+          <div className="muted-panel" style={{ marginTop: 12 }}>
+            No categories found.
+          </div>
+        ) : null}
       </div>
 
       <div className="panel">
@@ -157,10 +174,11 @@ export default function Expenses() {
               placeholder="Optional details"
             />
           </Field>
-          <button className="button button-primary" type="submit">
-            Save Expense
+          <button className="button button-primary" type="submit" disabled={savingExpense}>
+            {savingExpense ? "Saving..." : "Save Expense"}
           </button>
         </form>
+        {loadingExpenses ? <div className="status-message">Loading expenses...</div> : null}
         {error ? <div className="form-error">{error}</div> : null}
       </div>
 
@@ -189,6 +207,11 @@ export default function Expenses() {
             );
           })}
         </div>
+        {!loadingExpenses && expenses.length === 0 ? (
+          <div className="muted-panel" style={{ marginTop: 12 }}>
+            No data found.
+          </div>
+        ) : null}
         <PaginationControls
           count={expensesMeta.count}
           currentPage={expensesPage}

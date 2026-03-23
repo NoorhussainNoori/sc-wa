@@ -25,6 +25,8 @@ export default function Classes() {
   });
   const [form, setForm] = useState(emptyClass);
   const [error, setError] = useState("");
+  const [loadingClasses, setLoadingClasses] = useState(false);
+  const [savingClass, setSavingClass] = useState(false);
 
   const [dueYear, setDueYear] = useState("");
   const [dueMonth, setDueMonth] = useState("01");
@@ -55,6 +57,7 @@ export default function Classes() {
   };
 
   const loadClasses = async (page = 1) => {
+    setLoadingClasses(true);
     try {
       const params = new URLSearchParams({
         page: String(page),
@@ -66,12 +69,14 @@ export default function Classes() {
       setClassesPage(page);
     } catch (err) {
       setError(err.message || "Failed to load classes.");
+    } finally {
+      setLoadingClasses(false);
     }
   };
 
   useEffect(() => {
     const run = async () => {
-      await loadClasses(classesPage);
+      await loadClasses(1);
     };
     void run();
   }, []);
@@ -180,6 +185,7 @@ export default function Classes() {
 
           <div class="receipt-block">
             <div><span class="label">Student:</span> <span>${escapeHtml(d.student_name)}</span></div>
+            <div><span class="label">Reg No:</span> <span>${escapeHtml(d.registration_number || "-")}</span></div>
             <div><span class="label">Father:</span> <span>${escapeHtml(d.father_name)}</span></div>
             <div><span class="label">Phone:</span> <span>${escapeHtml(d.phone)}</span></div>
             <div><span class="label">Class:</span> <span>${escapeHtml(classLabel)}</span></div>
@@ -317,6 +323,7 @@ export default function Classes() {
   const onSubmit = async (event) => {
     event.preventDefault();
     setError("");
+    setSavingClass(true);
     try {
       await apiFetch("/classes/", {
         method: "POST",
@@ -326,6 +333,8 @@ export default function Classes() {
       await loadClasses();
     } catch (err) {
       setError(err.message || "Failed to create class.");
+    } finally {
+      setSavingClass(false);
     }
   };
 
@@ -402,10 +411,11 @@ export default function Classes() {
                   required
                 />
               </Field>
-              <button className="button button-primary" type="submit">
-                Save Class
+              <button className="button button-primary" type="submit" disabled={savingClass}>
+                {savingClass ? "Saving..." : "Save Class"}
               </button>
             </form>
+            {loadingClasses ? <div className="status-message">Loading classes...</div> : null}
             {error ? <div className="form-error">{error}</div> : null}
           </div>
 
@@ -433,6 +443,11 @@ export default function Classes() {
                 </div>
               ))}
             </div>
+            {!loadingClasses && classes.length === 0 ? (
+              <div className="muted-panel" style={{ marginTop: 12 }}>
+                No data found.
+              </div>
+            ) : null}
             <PaginationControls
               count={classesMeta.count}
               currentPage={classesPage}
@@ -520,6 +535,10 @@ export default function Classes() {
                 <div className="due-card-row">
                   <span className="due-card-label">Father</span>
                   <span>{d.father_name}</span>
+                </div>
+                <div className="due-card-row">
+                  <span className="due-card-label">Reg No</span>
+                  <span>{d.registration_number || "—"}</span>
                 </div>
                 <div className="due-card-row">
                   <span className="due-card-label">Phone</span>

@@ -43,12 +43,13 @@ class StudentViewSet(viewsets.ModelViewSet):
         if q:
             qs = qs.filter(
                 Q(name__icontains=q)
+                | Q(registration_number__icontains=q)
                 | Q(father_name__icontains=q)
                 | Q(grandfather_name__icontains=q)
                 | Q(phone__icontains=q)
             )
 
-        for field in ["name", "father_name", "grandfather_name", "phone"]:
+        for field in ["name", "registration_number", "father_name", "grandfather_name", "phone"]:
             value = self.request.query_params.get(field)
             if value:
                 lookup = {f"{field}__icontains": value}
@@ -149,6 +150,7 @@ class StudentViewSet(viewsets.ModelViewSet):
             "class_name",
             "year_shamsi",
             "name",
+            "registration_number",
             "father_name",
             "grandfather_name",
             "phone",
@@ -157,7 +159,7 @@ class StudentViewSet(viewsets.ModelViewSet):
             "uniform_fee_override",
             "book_fee_override",
         ]
-        sample = "1,,1404,Ali,Reza,Hassan,700000001,1200,0,0,0"
+        sample = "1,,1404,Ali,REG-001,Reza,Hassan,700000001,1200,0,0,0"
         content = ",".join(headers) + "\n" + sample + "\n"
         response = HttpResponse(content, content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="students_import_template.csv"'
@@ -353,6 +355,7 @@ class MonthlyDueFeesView(APIView):
                     {
                         "student_id": student.id,
                         "student_name": student.name,
+                        "registration_number": student.registration_number,
                         "father_name": student.father_name,
                         "grandfather_name": student.grandfather_name,
                         "phone": student.phone,
@@ -456,7 +459,7 @@ def _parse_optional_decimal(value, field_name, row_number, errors):
 
 def _build_student_from_row(row, row_number, classes_by_id, classes_by_name_year):
     errors = []
-    required_fields = ["name", "father_name", "grandfather_name", "phone"]
+    required_fields = ["name", "registration_number", "father_name", "grandfather_name", "phone"]
     for field in required_fields:
         if not str(row.get(field, "")).strip():
             errors.append({"row": row_number, "field": field, "message": "This field is required."})
@@ -512,6 +515,7 @@ def _build_student_from_row(row, row_number, classes_by_id, classes_by_name_year
     student = Student(
         school_class=school_class,
         name=str(row.get("name", "")).strip(),
+        registration_number=str(row.get("registration_number", "")).strip(),
         father_name=str(row.get("father_name", "")).strip(),
         grandfather_name=str(row.get("grandfather_name", "")).strip(),
         phone=phone,

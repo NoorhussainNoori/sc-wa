@@ -6,6 +6,7 @@ import PaginationControls from "../components/PaginationControls.jsx";
 const emptyStudent = {
   school_class: "",
   name: "",
+  registration_number: "",
   father_name: "",
   grandfather_name: "",
   phone: "",
@@ -28,12 +29,16 @@ export default function Students() {
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(emptyStudent);
   const [error, setError] = useState("");
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [savingStudent, setSavingStudent] = useState(false);
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [importFile, setImportFile] = useState(null);
   const [importMode, setImportMode] = useState("partial");
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
 
   const loadStudents = async (query = "", page = 1) => {
+    setLoadingStudents(true);
     try {
       const params = new URLSearchParams();
       if (query) params.set("q", query);
@@ -45,6 +50,8 @@ export default function Students() {
       setStudentsPage(page);
     } catch (err) {
       setError(err.message || "Failed to load students.");
+    } finally {
+      setLoadingStudents(false);
     }
   };
 
@@ -71,6 +78,7 @@ export default function Students() {
   const onSubmit = async (event) => {
     event.preventDefault();
     setError("");
+    setSavingStudent(true);
     try {
       await apiFetch("/students/", {
         method: "POST",
@@ -83,10 +91,13 @@ export default function Students() {
       await loadStudents(search, studentsPage);
     } catch (err) {
       setError(err.message || "Failed to create student.");
+    } finally {
+      setSavingStudent(false);
     }
   };
 
   const downloadTemplate = async () => {
+    setDownloadingTemplate(true);
     try {
       const res = await fetch(`${import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000/api"}/students/import-template/`, {
         headers: { Authorization: `Token ${localStorage.getItem("auth_token") || ""}` },
@@ -105,6 +116,8 @@ export default function Students() {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       setError(err.message || "Failed to download template.");
+    } finally {
+      setDownloadingTemplate(false);
     }
   };
 
@@ -147,10 +160,10 @@ export default function Students() {
             className="input"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by name, father, grandfather, phone..."
+            placeholder="Search by name, registration number, father, grandfather, phone..."
           />
-          <button className="button button-outline" onClick={() => loadStudents(search, 1)}>
-            Search
+          <button className="button button-outline" onClick={() => loadStudents(search, 1)} disabled={loadingStudents}>
+            {loadingStudents ? "Searching..." : "Search"}
           </button>
         </div>
       </div>
@@ -177,8 +190,8 @@ export default function Students() {
             <button className="button button-primary" type="submit" disabled={importing}>
               {importing ? "Importing..." : "Import Students"}
             </button>
-            <button className="button button-outline" type="button" onClick={downloadTemplate}>
-              Download Template
+            <button className="button button-outline" type="button" onClick={downloadTemplate} disabled={downloadingTemplate}>
+              {downloadingTemplate ? "Preparing..." : "Download Template"}
             </button>
           </div>
         </form>
@@ -218,6 +231,14 @@ export default function Students() {
               <Field label="Name">
                 <input className="input" value={form.name} onChange={onChange("name")} required />
               </Field>
+              <Field label="Registration Number">
+                <input
+                  className="input"
+                  value={form.registration_number}
+                  onChange={onChange("registration_number")}
+                  required
+                />
+              </Field>
               <Field label="Father Name">
                 <input className="input" value={form.father_name} onChange={onChange("father_name")} required />
               </Field>
@@ -228,8 +249,8 @@ export default function Students() {
                 <input className="input" value={form.phone} onChange={onChange("phone")} required />
               </Field>
             </div>
-            <button className="button button-primary button-wide" type="submit">
-              Save Student
+            <button className="button button-primary button-wide" type="submit" disabled={savingStudent}>
+              {savingStudent ? "Saving..." : "Save Student"}
             </button>
           </div>
           <div className="student-form-side">
@@ -306,6 +327,7 @@ export default function Students() {
             )}
           </div>
         </form>
+        {loadingStudents ? <div className="status-message">Loading students...</div> : null}
         {error ? <div className="form-error">{error}</div> : null}
       </div>
 
@@ -315,6 +337,7 @@ export default function Students() {
           <div className="table-head">
             <div>ID</div>
             <div>Name</div>
+            <div>Reg No</div>
             <div>Father</div>
             <div>Grandfather</div>
             <div>Phone</div>
@@ -326,6 +349,7 @@ export default function Students() {
               <div className="table-row" key={student.id}>
                 <div>{student.id}</div>
                 <div>{student.name}</div>
+                <div>{student.registration_number || "—"}</div>
                 <div>{student.father_name}</div>
                 <div>{student.grandfather_name}</div>
                 <div>{student.phone}</div>
@@ -336,6 +360,11 @@ export default function Students() {
             );
           })}
         </div>
+        {!loadingStudents && students.length === 0 ? (
+          <div className="muted-panel" style={{ marginTop: 12 }}>
+            No data found.
+          </div>
+        ) : null}
         <PaginationControls
           count={studentsMeta.count}
           currentPage={studentsPage}

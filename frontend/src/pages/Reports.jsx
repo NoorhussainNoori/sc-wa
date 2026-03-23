@@ -23,8 +23,10 @@ export default function Reports() {
   const [filters, setFilters] = useState(defaultFilters);
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
+  const [loadingReport, setLoadingReport] = useState(false);
   const [activeTab, setActiveTab] = useState("summary");
   const [templateStatus, setTemplateStatus] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const [template, setTemplate] = useState(() => {
     try {
       const raw = localStorage.getItem(RECEIPT_TEMPLATE_KEY);
@@ -42,6 +44,7 @@ export default function Reports() {
 
   const fetchReport = async () => {
     setError("");
+    setLoadingReport(true);
     try {
       const params = new URLSearchParams();
       params.set("period", filters.period);
@@ -56,6 +59,8 @@ export default function Reports() {
       setSummary(data);
     } catch (err) {
       setError(err.message || "Failed to load report.");
+    } finally {
+      setLoadingReport(false);
     }
   };
 
@@ -74,8 +79,10 @@ export default function Reports() {
   };
 
   const saveTemplate = () => {
+    setSavingTemplate(true);
     localStorage.setItem(RECEIPT_TEMPLATE_KEY, JSON.stringify(template));
     setTemplateStatus("Receipt template saved.");
+    setTimeout(() => setSavingTemplate(false), 200);
   };
 
   const clearLogo = () => {
@@ -90,12 +97,12 @@ export default function Reports() {
           <p>Revenue, expenses, and profit with flexible date ranges.</p>
         </div>
         {activeTab === "summary" ? (
-          <button className="button button-primary" onClick={fetchReport}>
-            Generate Report
+          <button className="button button-primary" onClick={fetchReport} disabled={loadingReport}>
+            {loadingReport ? "Generating..." : "Generate Report"}
           </button>
         ) : (
-          <button className="button button-primary" onClick={saveTemplate}>
-            Save Template
+          <button className="button button-primary" onClick={saveTemplate} disabled={savingTemplate}>
+            {savingTemplate ? "Saving..." : "Save Template"}
           </button>
         )}
       </div>
@@ -157,6 +164,7 @@ export default function Reports() {
             Include items
           </label>
         </div>
+        {loadingReport ? <div className="status-message">Generating report...</div> : null}
         {error ? <div className="form-error">{error}</div> : null}
       </div>
 
@@ -169,48 +177,56 @@ export default function Reports() {
       {summary?.payments ? (
         <div className="panel">
           <h3>Payment Details</h3>
-          <div className="table">
-            <div className="table-head">
-              <div>ID</div>
-              <div>Student</div>
-              <div>Type</div>
-              <div>Amount</div>
-              <div>Date</div>
-            </div>
-            {summary.payments.map((payment) => (
-              <div className="table-row" key={payment.id}>
-                <div>{payment.id}</div>
-                <div>{payment.student_name || payment.student}</div>
-                <div>{payment.fee_type_name || payment.fee_type}</div>
-                <div>{payment.amount}</div>
-                <div>{payment.date_shamsi}</div>
+          {summary.payments.length > 0 ? (
+            <div className="table">
+              <div className="table-head">
+                <div>ID</div>
+                <div>Student</div>
+                <div>Type</div>
+                <div>Amount</div>
+                <div>Date</div>
               </div>
-            ))}
-          </div>
+              {summary.payments.map((payment) => (
+                <div className="table-row" key={payment.id}>
+                  <div>{payment.id}</div>
+                  <div>{payment.student_name || payment.student}</div>
+                  <div>{payment.fee_type_name || payment.fee_type}</div>
+                  <div>{payment.amount}</div>
+                  <div>{payment.date_shamsi}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="muted-panel">No payment data found for this filter.</div>
+          )}
         </div>
       ) : null}
 
       {summary?.expenses ? (
         <div className="panel">
           <h3>Expense Details</h3>
-          <div className="table">
-            <div className="table-head">
-              <div>ID</div>
-              <div>Category</div>
-              <div>Amount</div>
-              <div>Date</div>
-              <div>Paid By</div>
-            </div>
-            {summary.expenses.map((expense) => (
-              <div className="table-row" key={expense.id}>
-                <div>{expense.id}</div>
-                <div>{expense.category_name || expense.category}</div>
-                <div>{expense.amount}</div>
-                <div>{expense.date_shamsi}</div>
-                <div>{expense.paid_by}</div>
+          {summary.expenses.length > 0 ? (
+            <div className="table">
+              <div className="table-head">
+                <div>ID</div>
+                <div>Category</div>
+                <div>Amount</div>
+                <div>Date</div>
+                <div>Paid By</div>
               </div>
-            ))}
-          </div>
+              {summary.expenses.map((expense) => (
+                <div className="table-row" key={expense.id}>
+                  <div>{expense.id}</div>
+                  <div>{expense.category_name || expense.category}</div>
+                  <div>{expense.amount}</div>
+                  <div>{expense.date_shamsi}</div>
+                  <div>{expense.paid_by}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="muted-panel">No expense data found for this filter.</div>
+          )}
         </div>
       ) : null}
       </>
@@ -237,8 +253,8 @@ export default function Reports() {
               <button className="button button-outline" type="button" onClick={clearLogo}>
                 Remove Logo
               </button>
-              <button className="button button-primary" type="button" onClick={saveTemplate}>
-                Save Template
+              <button className="button button-primary" type="button" onClick={saveTemplate} disabled={savingTemplate}>
+                {savingTemplate ? "Saving..." : "Save Template"}
               </button>
             </div>
           </div>

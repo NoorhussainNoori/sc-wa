@@ -24,8 +24,11 @@ export default function Teachers() {
   });
   const [form, setForm] = useState(emptyTeacher);
   const [error, setError] = useState("");
+  const [loadingTeachers, setLoadingTeachers] = useState(false);
+  const [savingTeacher, setSavingTeacher] = useState(false);
 
   const loadTeachers = async (page = 1) => {
+    setLoadingTeachers(true);
     try {
       const params = new URLSearchParams({
         page: String(page),
@@ -37,12 +40,14 @@ export default function Teachers() {
       setTeachersPage(page);
     } catch (err) {
       setError(err.message || "Failed to load teachers.");
+    } finally {
+      setLoadingTeachers(false);
     }
   };
 
   useEffect(() => {
     const run = async () => {
-      await loadTeachers(teachersPage);
+      await loadTeachers(1);
     };
     void run();
   }, []);
@@ -54,6 +59,7 @@ export default function Teachers() {
   const onSubmit = async (event) => {
     event.preventDefault();
     setError("");
+    setSavingTeacher(true);
     try {
       await apiFetch("/teachers/", {
         method: "POST",
@@ -63,6 +69,8 @@ export default function Teachers() {
       await loadTeachers();
     } catch (err) {
       setError(err.message || "Failed to create teacher.");
+    } finally {
+      setSavingTeacher(false);
     }
   };
 
@@ -99,10 +107,11 @@ export default function Teachers() {
           <Field label="Department">
             <input className="input" value={form.department} onChange={onChange("department")} required />
           </Field>
-          <button className="button button-primary" type="submit">
-            Save Teacher
+          <button className="button button-primary" type="submit" disabled={savingTeacher}>
+            {savingTeacher ? "Saving..." : "Save Teacher"}
           </button>
         </form>
+        {loadingTeachers ? <div className="status-message">Loading teachers...</div> : null}
         {error ? <div className="form-error">{error}</div> : null}
       </div>
 
@@ -130,6 +139,11 @@ export default function Teachers() {
             </div>
           ))}
         </div>
+        {!loadingTeachers && teachers.length === 0 ? (
+          <div className="muted-panel" style={{ marginTop: 12 }}>
+            No data found.
+          </div>
+        ) : null}
         <PaginationControls
           count={teachersMeta.count}
           currentPage={teachersPage}

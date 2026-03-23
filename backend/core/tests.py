@@ -27,6 +27,7 @@ class TestCoreSmokeTests(APITestCase):
         self.student = Student.objects.create(
             school_class=self.school_class,
             name="Ali",
+            registration_number="REG-1001",
             father_name="Reza",
             grandfather_name="Hassan",
             phone="700000000",
@@ -65,6 +66,9 @@ class TestCoreSmokeTests(APITestCase):
         self.assertIn("results", res.data)
         returned_ids = {item["id"] for item in res.data["results"]}
         self.assertIn(self.student.id, returned_ids)
+        res = self.client.get(f"/api/students/?q={self.student.registration_number}")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn(self.student.id, {item["id"] for item in res.data["results"]})
 
         res = self.client.get(f"/api/payments/?student_id={self.student.id}")
         self.assertEqual(res.status_code, 200)
@@ -75,8 +79,8 @@ class TestCoreSmokeTests(APITestCase):
     def test_students_bulk_import_csv(self):
         self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
         csv_content = (
-            "class_id,class_name,year_shamsi,name,father_name,grandfather_name,phone\n"
-            f"{self.school_class.id},,1403,Zahid,Rahim,Karim,700000123\n"
+            "class_id,class_name,year_shamsi,name,registration_number,father_name,grandfather_name,phone\n"
+            f"{self.school_class.id},,1403,Zahid,REG-2002,Rahim,Karim,700000123\n"
         ).encode("utf-8")
         upload = SimpleUploadedFile("students.csv", csv_content, content_type="text/csv")
 
@@ -84,6 +88,7 @@ class TestCoreSmokeTests(APITestCase):
         self.assertEqual(res.status_code, 201)
         self.assertEqual(res.data["imported"], 1)
         self.assertEqual(Student.objects.filter(name="Zahid").count(), 1)
+        self.assertEqual(Student.objects.get(name="Zahid").registration_number, "REG-2002")
 
     def test_monthly_dues_report(self):
         # Use the month_shamsi value calculated/stored on the Payment record

@@ -22,6 +22,7 @@ class Student(models.Model):
         blank=True,
     )
     name = models.CharField(max_length=120)
+    registration_number = models.CharField(max_length=50, blank=True, default="")
     father_name = models.CharField(max_length=120)
     grandfather_name = models.CharField(max_length=120)
     phone = models.CharField(max_length=30, validators=[digits_only_validator])
@@ -58,6 +59,7 @@ class Student(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=["name"]),
+            models.Index(fields=["registration_number"]),
             models.Index(fields=["father_name"]),
             models.Index(fields=["grandfather_name"]),
             models.Index(fields=["phone"]),
