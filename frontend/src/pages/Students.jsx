@@ -28,6 +28,7 @@ export default function Students() {
   });
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(emptyStudent);
+  const [editingStudentId, setEditingStudentId] = useState(null);
   const [error, setError] = useState("");
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [savingStudent, setSavingStudent] = useState(false);
@@ -80,19 +81,51 @@ export default function Students() {
     setError("");
     setSavingStudent(true);
     try {
-      await apiFetch("/students/", {
-        method: "POST",
+      await apiFetch(editingStudentId ? `/students/${editingStudentId}/` : "/students/", {
+        method: editingStudentId ? "PUT" : "POST",
         body: JSON.stringify({
           ...form,
           school_class: form.school_class || null,
         }),
       });
       setForm(emptyStudent);
+      setEditingStudentId(null);
       await loadStudents(search, studentsPage);
     } catch (err) {
-      setError(err.message || "Failed to create student.");
+      setError(err.message || `Failed to ${editingStudentId ? "update" : "create"} student.`);
     } finally {
       setSavingStudent(false);
+    }
+  };
+
+  const onEditStudent = (student) => {
+    setEditingStudentId(student.id);
+    setForm({
+      school_class: student.school_class || "",
+      name: student.name || "",
+      registration_number: student.registration_number || "",
+      father_name: student.father_name || "",
+      grandfather_name: student.grandfather_name || "",
+      phone: student.phone || "",
+      monthly_fee_override: student.monthly_fee_override || "",
+      transport_fee_override: student.transport_fee_override || "",
+      uniform_fee_override: student.uniform_fee_override || "",
+      book_fee_override: student.book_fee_override || "",
+    });
+  };
+
+  const onDeleteStudent = async (student) => {
+    if (!window.confirm(`Delete student "${student.name}"?`)) return;
+    setError("");
+    try {
+      await apiFetch(`/students/${student.id}/`, { method: "DELETE" });
+      if (editingStudentId === student.id) {
+        setEditingStudentId(null);
+        setForm(emptyStudent);
+      }
+      await loadStudents(search, studentsPage);
+    } catch (err) {
+      setError(err.message || "Failed to delete student.");
     }
   };
 
@@ -214,7 +247,7 @@ export default function Students() {
       </div>
 
       <div className="panel">
-        <h3>New Student</h3>
+        <h3>{editingStudentId ? "Edit Student" : "New Student"}</h3>
         <form className="student-form" onSubmit={onSubmit}>
           <div className="student-form-main">
             <div className="form-grid">
@@ -250,8 +283,20 @@ export default function Students() {
               </Field>
             </div>
             <button className="button button-primary button-wide" type="submit" disabled={savingStudent}>
-              {savingStudent ? "Saving..." : "Save Student"}
+              {savingStudent ? "Saving..." : editingStudentId ? "Update Student" : "Save Student"}
             </button>
+            {editingStudentId ? (
+              <button
+                className="button button-outline"
+                type="button"
+                onClick={() => {
+                  setEditingStudentId(null);
+                  setForm(emptyStudent);
+                }}
+              >
+                Cancel Edit
+              </button>
+            ) : null}
           </div>
           <div className="student-form-side">
             {form.school_class ? (
@@ -342,6 +387,7 @@ export default function Students() {
             <div>Grandfather</div>
             <div>Phone</div>
             <div>Class</div>
+            <div>Actions</div>
           </div>
           {students.map((student) => {
             const classEntry = classes.find((cls) => cls.id === student.school_class);
@@ -355,6 +401,14 @@ export default function Students() {
                 <div>{student.phone}</div>
                 <div>
                   {classEntry ? `${classEntry.name} (${classEntry.year_shamsi})` : "—"}
+                </div>
+                <div className="inline-actions">
+                  <button className="button button-outline" type="button" onClick={() => onEditStudent(student)}>
+                    Edit
+                  </button>
+                  <button className="button button-outline" type="button" onClick={() => onDeleteStudent(student)}>
+                    Delete
+                  </button>
                 </div>
               </div>
             );

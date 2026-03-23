@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.utils import timezone
 
 from .models import (
     Student,
@@ -45,6 +46,9 @@ class PaymentSerializer(serializers.ModelSerializer):
         model = Payment
         fields = "__all__"
         read_only_fields = ["month_shamsi"]
+        extra_kwargs = {
+            "bill_number": {"required": False, "allow_blank": True},
+        }
 
     def get_student_name(self, obj):
         return getattr(obj.student, "name", "") if obj.student_id else ""
@@ -68,6 +72,8 @@ class PaymentSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
+        if not validated_data.get("bill_number"):
+            validated_data["bill_number"] = timezone.now().strftime("%y%m%d%H%M%S%f")[:16]
         if validated_data.get("student") and not validated_data.get("school_class"):
             validated_data["school_class"] = validated_data["student"].school_class
         return super().create(validated_data)

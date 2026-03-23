@@ -105,6 +105,11 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         errors = []
         students_to_create = []
+        existing_registration_numbers = {
+            value
+            for value in Student.objects.exclude(registration_number="").values_list("registration_number", flat=True)
+        }
+        pending_registration_numbers = set()
         max_rows = 10000
         if len(rows) > max_rows:
             return Response(
@@ -117,6 +122,17 @@ class StudentViewSet(viewsets.ModelViewSet):
             if row_errors:
                 errors.extend(row_errors)
                 continue
+            reg_no = (student_obj.registration_number or "").strip()
+            if reg_no in existing_registration_numbers or reg_no in pending_registration_numbers:
+                errors.append(
+                    {
+                        "row": row_number,
+                        "field": "registration_number",
+                        "message": "Registration number already exists.",
+                    }
+                )
+                continue
+            pending_registration_numbers.add(reg_no)
             students_to_create.append(student_obj)
 
         if mode == "strict" and errors:

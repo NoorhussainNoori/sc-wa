@@ -24,6 +24,7 @@ export default function Classes() {
     previous: null,
   });
   const [form, setForm] = useState(emptyClass);
+  const [editingClassId, setEditingClassId] = useState(null);
   const [error, setError] = useState("");
   const [loadingClasses, setLoadingClasses] = useState(false);
   const [savingClass, setSavingClass] = useState(false);
@@ -325,16 +326,44 @@ export default function Classes() {
     setError("");
     setSavingClass(true);
     try {
-      await apiFetch("/classes/", {
-        method: "POST",
+      await apiFetch(editingClassId ? `/classes/${editingClassId}/` : "/classes/", {
+        method: editingClassId ? "PUT" : "POST",
         body: JSON.stringify(form),
       });
       setForm(emptyClass);
+      setEditingClassId(null);
       await loadClasses();
     } catch (err) {
-      setError(err.message || "Failed to create class.");
+      setError(err.message || `Failed to ${editingClassId ? "update" : "create"} class.`);
     } finally {
       setSavingClass(false);
+    }
+  };
+
+  const onEditClass = (cls) => {
+    setEditingClassId(cls.id);
+    setForm({
+      name: cls.name || "",
+      year_shamsi: cls.year_shamsi || "",
+      monthly_fee: cls.monthly_fee || "",
+      transport_fee: cls.transport_fee || "",
+      uniform_fee: cls.uniform_fee || "",
+      book_fee: cls.book_fee || "",
+    });
+  };
+
+  const onDeleteClass = async (cls) => {
+    if (!window.confirm(`Delete class "${cls.name}" (${cls.year_shamsi})?`)) return;
+    setError("");
+    try {
+      await apiFetch(`/classes/${cls.id}/`, { method: "DELETE" });
+      if (editingClassId === cls.id) {
+        setEditingClassId(null);
+        setForm(emptyClass);
+      }
+      await loadClasses(classesPage);
+    } catch (err) {
+      setError(err.message || "Failed to delete class.");
     }
   };
 
@@ -366,7 +395,7 @@ export default function Classes() {
       {tab === "management" ? (
         <>
           <div className="panel">
-            <h3>New Class</h3>
+            <h3>{editingClassId ? "Edit Class" : "New Class"}</h3>
             <form className="form-grid" onSubmit={onSubmit}>
               <Field label="Class Name">
                 <input className="input" value={form.name} onChange={onChange("name")} required />
@@ -412,8 +441,20 @@ export default function Classes() {
                 />
               </Field>
               <button className="button button-primary" type="submit" disabled={savingClass}>
-                {savingClass ? "Saving..." : "Save Class"}
+                {savingClass ? "Saving..." : editingClassId ? "Update Class" : "Save Class"}
               </button>
+              {editingClassId ? (
+                <button
+                  className="button button-outline"
+                  type="button"
+                  onClick={() => {
+                    setEditingClassId(null);
+                    setForm(emptyClass);
+                  }}
+                >
+                  Cancel Edit
+                </button>
+              ) : null}
             </form>
             {loadingClasses ? <div className="status-message">Loading classes...</div> : null}
             {error ? <div className="form-error">{error}</div> : null}
@@ -430,6 +471,7 @@ export default function Classes() {
                 <div>Transport</div>
                 <div>Uniform</div>
                 <div>Book</div>
+                <div>Actions</div>
               </div>
               {classes.map((cls) => (
                 <div className="table-row" key={cls.id}>
@@ -440,6 +482,14 @@ export default function Classes() {
                   <div>{cls.transport_fee}</div>
                   <div>{cls.uniform_fee}</div>
                   <div>{cls.book_fee}</div>
+                  <div className="inline-actions">
+                    <button className="button button-outline" type="button" onClick={() => onEditClass(cls)}>
+                      Edit
+                    </button>
+                    <button className="button button-outline" type="button" onClick={() => onDeleteClass(cls)}>
+                      Delete
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

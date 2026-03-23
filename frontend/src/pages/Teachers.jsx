@@ -23,6 +23,7 @@ export default function Teachers() {
     previous: null,
   });
   const [form, setForm] = useState(emptyTeacher);
+  const [editingTeacherId, setEditingTeacherId] = useState(null);
   const [error, setError] = useState("");
   const [loadingTeachers, setLoadingTeachers] = useState(false);
   const [savingTeacher, setSavingTeacher] = useState(false);
@@ -61,16 +62,45 @@ export default function Teachers() {
     setError("");
     setSavingTeacher(true);
     try {
-      await apiFetch("/teachers/", {
-        method: "POST",
+      await apiFetch(editingTeacherId ? `/teachers/${editingTeacherId}/` : "/teachers/", {
+        method: editingTeacherId ? "PUT" : "POST",
         body: JSON.stringify(form),
       });
       setForm(emptyTeacher);
+      setEditingTeacherId(null);
       await loadTeachers();
     } catch (err) {
-      setError(err.message || "Failed to create teacher.");
+      setError(err.message || `Failed to ${editingTeacherId ? "update" : "create"} teacher.`);
     } finally {
       setSavingTeacher(false);
+    }
+  };
+
+  const onEditTeacher = (teacher) => {
+    setEditingTeacherId(teacher.id);
+    setForm({
+      name: teacher.name || "",
+      father_name: teacher.father_name || "",
+      phone: teacher.phone || "",
+      email: teacher.email || "",
+      address: teacher.address || "",
+      salary: teacher.salary || "",
+      department: teacher.department || "",
+    });
+  };
+
+  const onDeleteTeacher = async (teacher) => {
+    if (!window.confirm(`Delete teacher "${teacher.name}"?`)) return;
+    setError("");
+    try {
+      await apiFetch(`/teachers/${teacher.id}/`, { method: "DELETE" });
+      if (editingTeacherId === teacher.id) {
+        setEditingTeacherId(null);
+        setForm(emptyTeacher);
+      }
+      await loadTeachers(teachersPage);
+    } catch (err) {
+      setError(err.message || "Failed to delete teacher.");
     }
   };
 
@@ -84,7 +114,7 @@ export default function Teachers() {
       </div>
 
       <div className="panel">
-        <h3>New Teacher</h3>
+        <h3>{editingTeacherId ? "Edit Teacher" : "New Teacher"}</h3>
         <form className="form-grid" onSubmit={onSubmit}>
           <Field label="Name">
             <input className="input" value={form.name} onChange={onChange("name")} required />
@@ -108,8 +138,20 @@ export default function Teachers() {
             <input className="input" value={form.department} onChange={onChange("department")} required />
           </Field>
           <button className="button button-primary" type="submit" disabled={savingTeacher}>
-            {savingTeacher ? "Saving..." : "Save Teacher"}
+            {savingTeacher ? "Saving..." : editingTeacherId ? "Update Teacher" : "Save Teacher"}
           </button>
+          {editingTeacherId ? (
+            <button
+              className="button button-outline"
+              type="button"
+              onClick={() => {
+                setEditingTeacherId(null);
+                setForm(emptyTeacher);
+              }}
+            >
+              Cancel Edit
+            </button>
+          ) : null}
         </form>
         {loadingTeachers ? <div className="status-message">Loading teachers...</div> : null}
         {error ? <div className="form-error">{error}</div> : null}
@@ -126,6 +168,7 @@ export default function Teachers() {
             <div>Email</div>
             <div>Department</div>
             <div>Salary</div>
+            <div>Actions</div>
           </div>
           {teachers.map((teacher) => (
             <div className="table-row" key={teacher.id}>
@@ -136,6 +179,14 @@ export default function Teachers() {
               <div>{teacher.email}</div>
               <div>{teacher.department}</div>
               <div>{teacher.salary}</div>
+              <div className="inline-actions">
+                <button className="button button-outline" type="button" onClick={() => onEditTeacher(teacher)}>
+                  Edit
+                </button>
+                <button className="button button-outline" type="button" onClick={() => onDeleteTeacher(teacher)}>
+                  Delete
+                </button>
+              </div>
             </div>
           ))}
         </div>

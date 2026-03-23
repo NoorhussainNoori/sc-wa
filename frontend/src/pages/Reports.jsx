@@ -89,6 +89,157 @@ export default function Reports() {
     setTemplate((prev) => ({ ...prev, logoDataUrl: "" }));
   };
 
+  const exportReportCsv = () => {
+    if (!summary) return;
+    const lines = [];
+    lines.push(`School,${template.schoolName}`);
+    lines.push(`Address,${template.schoolAddress}`);
+    lines.push(`Phone,${template.schoolPhone}`);
+    lines.push(`Period,${filters.period}`);
+    lines.push(`Total Revenue,${summary.total_revenue || 0}`);
+    lines.push(`Total Expenses,${summary.total_expenses || 0}`);
+    lines.push(`Profit,${summary.profit || 0}`);
+    lines.push("");
+    lines.push("Payments");
+    lines.push("ID,Student,Type,Amount,Date");
+    (summary.payments || []).forEach((item) => {
+      lines.push(
+        [
+          item.id,
+          `"${String(item.student_name || item.student || "").replaceAll('"', '""')}"`,
+          `"${String(item.fee_type_name || item.fee_type || "").replaceAll('"', '""')}"`,
+          item.amount,
+          item.date_shamsi,
+        ].join(",")
+      );
+    });
+    lines.push("");
+    lines.push("Expenses");
+    lines.push("ID,Category,Amount,Date,Paid By");
+    (summary.expenses || []).forEach((item) => {
+      lines.push(
+        [
+          item.id,
+          `"${String(item.category_name || item.category || "").replaceAll('"', '""')}"`,
+          item.amount,
+          item.date_shamsi,
+          `"${String(item.paid_by || "").replaceAll('"', '""')}"`,
+        ].join(",")
+      );
+    });
+
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "financial_report.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportReportPdf = () => {
+    if (!summary) return;
+    const reportWindow = window.open("", "_blank", "width=1100,height=900");
+    if (!reportWindow) return;
+    const paymentsRows = (summary.payments || [])
+      .map(
+        (item) => `
+          <tr>
+            <td>${item.id}</td>
+            <td>${item.student_name || item.student || ""}</td>
+            <td>${item.fee_type_name || item.fee_type || ""}</td>
+            <td>${item.amount}</td>
+            <td>${item.date_shamsi}</td>
+          </tr>
+        `
+      )
+      .join("");
+    const expensesRows = (summary.expenses || [])
+      .map(
+        (item) => `
+          <tr>
+            <td>${item.id}</td>
+            <td>${item.category_name || item.category || ""}</td>
+            <td>${item.amount}</td>
+            <td>${item.date_shamsi}</td>
+            <td>${item.paid_by || ""}</td>
+          </tr>
+        `
+      )
+      .join("");
+
+    const html = `
+      <html>
+        <head>
+          <title>Financial Report</title>
+          <style>
+            body { font-family: "Segoe UI", Arial, sans-serif; color: #0f172a; padding: 24px; }
+            .head { display:flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+            .brand { display:flex; gap: 12px; align-items: center; }
+            .logo { width:64px; height:64px; object-fit: contain; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
+            .title { font-size: 1.4rem; font-weight: 800; margin: 0; }
+            .muted { color:#64748b; }
+            .kpi { display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; }
+            .k { border:1px solid #e2e8f0; border-radius: 10px; padding: 10px; }
+            table { width:100%; border-collapse: collapse; margin-top: 10px; }
+            th, td { border:1px solid #e2e8f0; padding: 8px; text-align:left; font-size: 0.9rem; }
+            th { background:#f8fafc; }
+            h3 { margin-top: 20px; margin-bottom: 8px; }
+            @media print { .no-print { display:none !important; } }
+          </style>
+        </head>
+        <body>
+          <div class="head">
+            <div class="brand">
+              ${
+                template.logoDataUrl
+                  ? `<img src="${template.logoDataUrl}" class="logo" alt="School logo" />`
+                  : `<div class="logo"></div>`
+              }
+              <div>
+                <p class="title">${template.schoolName}</p>
+                <div class="muted">${template.schoolAddress}</div>
+                <div class="muted">${template.schoolPhone}</div>
+              </div>
+            </div>
+            <div>
+              <div class="muted">Financial Report</div>
+              <div class="muted">Period: ${filters.period}</div>
+            </div>
+          </div>
+
+          <div class="kpi">
+            <div class="k"><div class="muted">Total Revenue</div><strong>${summary.total_revenue || 0}</strong></div>
+            <div class="k"><div class="muted">Total Expenses</div><strong>${summary.total_expenses || 0}</strong></div>
+            <div class="k"><div class="muted">Profit</div><strong>${summary.profit || 0}</strong></div>
+          </div>
+
+          <h3>Payments</h3>
+          <table>
+            <thead>
+              <tr><th>ID</th><th>Student</th><th>Type</th><th>Amount</th><th>Date</th></tr>
+            </thead>
+            <tbody>${paymentsRows || '<tr><td colspan="5">No payment data found.</td></tr>'}</tbody>
+          </table>
+
+          <h3>Expenses</h3>
+          <table>
+            <thead>
+              <tr><th>ID</th><th>Category</th><th>Amount</th><th>Date</th><th>Paid By</th></tr>
+            </thead>
+            <tbody>${expensesRows || '<tr><td colspan="5">No expense data found.</td></tr>'}</tbody>
+          </table>
+        </body>
+      </html>
+    `;
+    reportWindow.document.write(html);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
+  };
+
   return (
     <div className="page">
       <div className="page-header">
@@ -123,6 +274,17 @@ export default function Reports() {
           Receipt Template
         </button>
       </div>
+
+      {activeTab === "summary" && summary ? (
+        <div className="inline-actions">
+          <button className="button button-outline" type="button" onClick={exportReportCsv}>
+            Export CSV
+          </button>
+          <button className="button button-outline" type="button" onClick={exportReportPdf}>
+            Export PDF
+          </button>
+        </div>
+      ) : null}
 
       {activeTab === "summary" ? (
         <>

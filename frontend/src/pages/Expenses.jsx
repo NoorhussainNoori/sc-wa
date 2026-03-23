@@ -23,6 +23,7 @@ export default function Expenses() {
   });
   const [categoryName, setCategoryName] = useState("");
   const [form, setForm] = useState(emptyExpense);
+  const [editingExpenseId, setEditingExpenseId] = useState(null);
   const [error, setError] = useState("");
   const [loadingExpenses, setLoadingExpenses] = useState(false);
   const [savingExpense, setSavingExpense] = useState(false);
@@ -89,16 +90,43 @@ export default function Expenses() {
     setError("");
     setSavingExpense(true);
     try {
-      await apiFetch("/expenses/", {
-        method: "POST",
+      await apiFetch(editingExpenseId ? `/expenses/${editingExpenseId}/` : "/expenses/", {
+        method: editingExpenseId ? "PUT" : "POST",
         body: JSON.stringify(form),
       });
       setForm(emptyExpense);
+      setEditingExpenseId(null);
       await loadExpenses(expensesPage);
     } catch (err) {
-      setError(err.message || "Failed to save expense.");
+      setError(err.message || `Failed to ${editingExpenseId ? "update" : "save"} expense.`);
     } finally {
       setSavingExpense(false);
+    }
+  };
+
+  const onEditExpense = (expense) => {
+    setEditingExpenseId(expense.id);
+    setForm({
+      category: expense.category || "",
+      amount: expense.amount || "",
+      date_shamsi: expense.date_shamsi || "",
+      paid_by: expense.paid_by || "",
+      description: expense.description || "",
+    });
+  };
+
+  const onDeleteExpense = async (expense) => {
+    if (!window.confirm(`Delete expense #${expense.id}?`)) return;
+    setError("");
+    try {
+      await apiFetch(`/expenses/${expense.id}/`, { method: "DELETE" });
+      if (editingExpenseId === expense.id) {
+        setEditingExpenseId(null);
+        setForm(emptyExpense);
+      }
+      await loadExpenses(expensesPage);
+    } catch (err) {
+      setError(err.message || "Failed to delete expense.");
     }
   };
 
@@ -139,7 +167,7 @@ export default function Expenses() {
       </div>
 
       <div className="panel">
-        <h3>New Expense</h3>
+        <h3>{editingExpenseId ? "Edit Expense" : "New Expense"}</h3>
         <form className="form-grid" onSubmit={onSubmit}>
           <Field label="Category">
             <select className="input" value={form.category} onChange={onChange("category")} required>
@@ -175,8 +203,20 @@ export default function Expenses() {
             />
           </Field>
           <button className="button button-primary" type="submit" disabled={savingExpense}>
-            {savingExpense ? "Saving..." : "Save Expense"}
+            {savingExpense ? "Saving..." : editingExpenseId ? "Update Expense" : "Save Expense"}
           </button>
+          {editingExpenseId ? (
+            <button
+              className="button button-outline"
+              type="button"
+              onClick={() => {
+                setEditingExpenseId(null);
+                setForm(emptyExpense);
+              }}
+            >
+              Cancel Edit
+            </button>
+          ) : null}
         </form>
         {loadingExpenses ? <div className="status-message">Loading expenses...</div> : null}
         {error ? <div className="form-error">{error}</div> : null}
@@ -192,6 +232,7 @@ export default function Expenses() {
             <div>Date</div>
             <div>Paid By</div>
             <div>Description</div>
+            <div>Actions</div>
           </div>
           {expenses.map((expense) => {
             const categoryEntry = categories.find((cat) => cat.id === expense.category);
@@ -203,6 +244,14 @@ export default function Expenses() {
                 <div>{expense.date_shamsi}</div>
                 <div>{expense.paid_by}</div>
                 <div>{expense.description || "—"}</div>
+                <div className="inline-actions">
+                  <button className="button button-outline" type="button" onClick={() => onEditExpense(expense)}>
+                    Edit
+                  </button>
+                  <button className="button button-outline" type="button" onClick={() => onDeleteExpense(expense)}>
+                    Delete
+                  </button>
+                </div>
               </div>
             );
           })}

@@ -40,6 +40,7 @@ export default function Payments() {
     previous: null,
   });
   const [form, setForm] = useState(emptyPayment);
+  const [editingPaymentId, setEditingPaymentId] = useState(null);
   const [error, setError] = useState("");
   const [searchingStudents, setSearchingStudents] = useState(false);
   const [loadingPayments, setLoadingPayments] = useState(false);
@@ -162,6 +163,7 @@ export default function Payments() {
     setSavingPayments(true);
     try {
       const dateShamsi = buildDateShamsi(form.date_year, form.date_month, form.date_day);
+      const effectiveBillNumber = String(form.bill_number || "").trim() || generateBillNumber();
       const itemsToSubmit = form.items.filter((item) => item.fee_type && item.amount);
       if (!itemsToSubmit.length) {
         setError("Add at least one valid fee type and amount.");
@@ -173,7 +175,7 @@ export default function Payments() {
         await apiFetch("/payments/", {
           method: "POST",
           body: JSON.stringify({
-            bill_number: form.bill_number,
+            bill_number: effectiveBillNumber,
             amount: item.amount,
             date_shamsi: dateShamsi,
             student: selectedStudent.id,
@@ -197,7 +199,7 @@ export default function Payments() {
         student: selectedStudent,
         classInfo: classes.find((cls) => cls.id === selectedStudent.school_class),
         paymentHeader: {
-          bill_number: form.bill_number,
+          bill_number: effectiveBillNumber,
           date_shamsi: dateShamsi,
           notes: form.notes || "",
         },
@@ -220,6 +222,72 @@ export default function Payments() {
     if (typeName.includes("uniform")) return student?.uniform_fee_override || classEntry.uniform_fee;
     if (typeName.includes("book")) return student?.book_fee_override || classEntry.book_fee;
     return "";
+  };
+
+  const onEditPayment = (payment) => {
+    setEditingPaymentId(payment.id);
+    setForm((prev) => ({
+      ...prev,
+      bill_number: payment.bill_number || "",
+      date_shamsi: payment.date_shamsi || "",
+      notes: payment.notes || "",
+      items: [
+        {
+          fee_type: payment.fee_type || "",
+          amount: payment.amount || "",
+          other_reason: payment.other_reason || "",
+        },
+      ],
+    }));
+  };
+
+  const onDeletePayment = async (payment) => {
+    if (!window.confirm(`Delete payment #${payment.id}?`)) return;
+    setError("");
+    try {
+      await apiFetch(`/payments/${payment.id}/`, { method: "DELETE" });
+      if (editingPaymentId === payment.id) {
+        setEditingPaymentId(null);
+        setForm(emptyPayment);
+      }
+      if (selectedStudent) {
+        await loadPayments(selectedStudent.id, paymentsPage);
+      }
+    } catch (err) {
+      setError(err.message || "Failed to delete payment.");
+    }
+  };
+
+  const onUpdateSinglePayment = async () => {
+    if (!editingPaymentId || !selectedStudent) return;
+    const item = form.items[0];
+    if (!item?.fee_type || !item?.amount) {
+      setError("Fee type and amount are required.");
+      return;
+    }
+    setError("");
+    setSavingPayments(true);
+    try {
+      await apiFetch(`/payments/${editingPaymentId}/`, {
+        method: "PUT",
+        body: JSON.stringify({
+          student: selectedStudent.id,
+          fee_type: item.fee_type,
+          bill_number: String(form.bill_number || "").trim() || generateBillNumber(),
+          amount: item.amount,
+          date_shamsi: form.date_shamsi,
+          other_reason: item.other_reason || "",
+          notes: form.notes || "",
+        }),
+      });
+      setEditingPaymentId(null);
+      setForm(emptyPayment);
+      await loadPayments(selectedStudent.id, paymentsPage);
+    } catch (err) {
+      setError(err.message || "Failed to update payment.");
+    } finally {
+      setSavingPayments(false);
+    }
   };
 
   return (
@@ -304,8 +372,13 @@ export default function Payments() {
               placeholder="Select a student above"
             />
           </Field>
-          <Field label="Bill Number">
-            <input className="input" value={form.bill_number} onChange={onChange("bill_number")} required />
+          <Field label="Bill Number (optional)">
+            <input
+              className="input"
+              value={form.bill_number}
+              onChange={onChange("bill_number")}
+              placeholder="Auto generated if left empty"
+            />
           </Field>
           <Field label="Shamsi Year">
             <input
@@ -313,7 +386,7 @@ export default function Payments() {
               value={form.date_year}
               onChange={onChange("date_year")}
               placeholder="1404"
-              required
+              required={!editingPaymentId}
             />
           </Field>
           <Field label="Shamsi Month">
@@ -321,7 +394,7 @@ export default function Payments() {
               className="input"
               value={form.date_month}
               onChange={onChange("date_month")}
-              required
+              required={!editingPaymentId}
             >
               <option value="">Select month</option>
               {Array.from({ length: 12 }).map((_, index) => {
@@ -339,7 +412,7 @@ export default function Payments() {
               className="input"
               value={form.date_day}
               onChange={onChange("date_day")}
-              required
+              required={!editingPaymentId}
             >
               <option value="">Select day</option>
               {Array.from({ length: 31 }).map((_, index) => {
@@ -352,6 +425,17 @@ export default function Payments() {
               })}
             </select>
           </Field>
+          {editingPaymentId ? (
+            <Field label="Date (Shamsi YYYY-MM-DD)">
+              <input
+                className="input"
+                value={form.date_shamsi || ""}
+                onChange={onChange("date_shamsi")}
+                placeholder="1404-01-10"
+                required
+              />
+            </Field>
+          ) : null}
           <Field label="Notes">
             <input
               className="input"
@@ -360,9 +444,30 @@ export default function Payments() {
               placeholder="Optional notes"
             />
           </Field>
-          <button className="button button-primary" type="submit" disabled={savingPayments}>
-            {savingPayments ? "Saving..." : "Save Payment"}
-          </button>
+          {editingPaymentId ? (
+            <button className="button button-primary" type="button" onClick={onUpdateSinglePayment} disabled={savingPayments}>
+              {savingPayments ? "Saving..." : "Update Payment"}
+            </button>
+          ) : (
+            <button className="button button-primary" type="submit" disabled={savingPayments}>
+              {savingPayments ? "Saving..." : "Save Payment"}
+            </button>
+          )}
+          {editingPaymentId ? (
+            <button
+              className="button button-outline"
+              type="button"
+              onClick={() => {
+                setEditingPaymentId(null);
+                setForm(emptyPayment);
+              }}
+            >
+              Cancel Edit
+            </button>
+          ) : null}
+          {editingPaymentId ? (
+            <div className="status-message">Edit mode updates one payment row only.</div>
+          ) : null}
         </form>
         <div className="panel" style={{ marginTop: 12 }}>
           <h4>Fee Items (Multiple allowed)</h4>
@@ -422,9 +527,11 @@ export default function Payments() {
               );
             })}
           </div>
-          <button className="button button-outline" type="button" onClick={addPaymentItem}>
-            Add Another Fee Type
-          </button>
+          {!editingPaymentId ? (
+            <button className="button button-outline" type="button" onClick={addPaymentItem}>
+              Add Another Fee Type
+            </button>
+          ) : null}
         </div>
         {loadingPayments ? <div className="status-message">Loading payment history...</div> : null}
         {error ? <div className="form-error">{error}</div> : null}
@@ -439,6 +546,7 @@ export default function Payments() {
             <div>Amount</div>
             <div>Date</div>
             <div>Reason</div>
+            <div>Actions</div>
           </div>
           {payments.map((payment) => {
             return (
@@ -448,6 +556,14 @@ export default function Payments() {
               <div>{payment.amount}</div>
               <div>{payment.date_shamsi}</div>
               <div>{payment.other_reason || "—"}</div>
+              <div className="inline-actions">
+                <button className="button button-outline" type="button" onClick={() => onEditPayment(payment)}>
+                  Edit
+                </button>
+                <button className="button button-outline" type="button" onClick={() => onDeletePayment(payment)}>
+                  Delete
+                </button>
+              </div>
             </div>
             );
           })}
@@ -476,6 +592,12 @@ export default function Payments() {
 function buildDateShamsi(year, month, day) {
   if (!year || !month || !day) return "";
   return `${year}-${month}-${day}`;
+}
+
+function generateBillNumber() {
+  return `${Date.now()}${Math.floor(Math.random() * 1000)
+    .toString()
+    .padStart(3, "0")}`;
 }
 
 function printReceipt({ student, classInfo, paymentHeader, items }) {

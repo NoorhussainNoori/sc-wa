@@ -22,7 +22,7 @@ class Student(models.Model):
         blank=True,
     )
     name = models.CharField(max_length=120)
-    registration_number = models.CharField(max_length=50, blank=True, default="")
+    registration_number = models.CharField(max_length=50, unique=True)
     father_name = models.CharField(max_length=120)
     grandfather_name = models.CharField(max_length=120)
     phone = models.CharField(max_length=30, validators=[digits_only_validator])
@@ -124,7 +124,12 @@ class Payment(models.Model):
         blank=True,
     )
     fee_type = models.ForeignKey(FeeType, on_delete=models.PROTECT, related_name="payments")
-    bill_number = models.CharField(max_length=30, validators=[digits_only_validator])
+    bill_number = models.CharField(
+        max_length=30,
+        validators=[digits_only_validator],
+        blank=True,
+        default="",
+    )
     amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0"))])
     date_shamsi = jmodels.jDateField()
     month_shamsi = models.CharField(max_length=7, blank=True)
@@ -137,6 +142,8 @@ class Payment(models.Model):
             raise ValidationError({"other_reason": "This field is required for the selected fee type."})
 
     def save(self, *args, **kwargs):
+        if not self.bill_number:
+            self.bill_number = timezone.now().strftime("%y%m%d%H%M%S%f")[:16]
         if self.date_shamsi:
             self.month_shamsi = f"{self.date_shamsi.year:04d}-{self.date_shamsi.month:02d}"
         if self.student and not self.school_class:
