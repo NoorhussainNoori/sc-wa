@@ -10,6 +10,7 @@ from .views import (
     ExpenseCategoryViewSet,
     ExpenseViewSet,
     ReportSummaryView,
+    MonthlyDueFeesView,
 )
 
 router = DefaultRouter()
@@ -24,4 +25,5 @@ router.register(r"expenses", ExpenseViewSet)
 urlpatterns = [
     path("", include(router.urls)),
     path("reports/summary/", ReportSummaryView.as_view(), name="report-summary"),
+    path("reports/monthly-dues/", MonthlyDueFeesView.as_view(), name="report-monthly-dues"),
 ]

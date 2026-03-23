@@ -249,8 +249,8 @@ class ReportSummaryView(APIView):
         end = request.query_params.get("end")
         include_items = request.query_params.get("include_items") == "1"
 
-        payment_qs = Payment.objects.all()
-        expense_qs = Expense.objects.all()
+        payment_qs = Payment.objects.select_related("student", "fee_type", "school_class").all()
+        expense_qs = Expense.objects.select_related("category").all()
 
         if period in {"day", "month", "year"} and date:
             try:
@@ -292,6 +292,86 @@ class ReportSummaryView(APIView):
             response["expenses"] = ExpenseSerializer(expense_qs.order_by("-created_at"), many=True).data
 
         return Response(response)
+
+
+class MonthlyDueFeesView(APIView):
+    """
+    Returns students who still owe the class monthly fee for a given Shamsi month.
+    """
+
+    def get(self, request):
+        month_shamsi = request.query_params.get("month_shamsi")
+        if not month_shamsi:
+            year = request.query_params.get("year")
+            month = request.query_params.get("month")
+            if year and month:
+                try:
+                    month_shamsi = f"{int(year):04d}-{int(month):02d}"
+                except ValueError as exc:
+                    return Response(
+                        {"detail": "Invalid year/month format."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+        if not month_shamsi:
+            return Response(
+                {"detail": "month_shamsi is required (YYYY-MM)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        class_id = request.query_params.get("class_id")
+
+        monthly_fee_types = FeeType.objects.filter(name__icontains="monthly")
+        if not monthly_fee_types.exists():
+            return Response(
+                {"detail": "Monthly FeeType not found. Create a FeeType with 'monthly' in its name."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        students_qs = Student.objects.select_related("school_class").filter(school_class__isnull=False)
+        if class_id:
+            students_qs = students_qs.filter(school_class_id=class_id)
+
+        paid_rows = (
+            Payment.objects.filter(month_shamsi=month_shamsi, fee_type__in=monthly_fee_types)
+            .values("student_id")
+            .annotate(paid=Sum("amount"))
+        )
+        paid_map = {str(row["student_id"]): row["paid"] for row in paid_rows}
+
+        results = []
+        for student in students_qs:
+            expected = (
+                student.monthly_fee_override
+                if student.monthly_fee_override is not None
+                else student.school_class.monthly_fee
+            )
+            paid = paid_map.get(str(student.id)) or Decimal("0")
+            due = expected - paid
+            if due > 0:
+                results.append(
+                    {
+                        "student_id": student.id,
+                        "student_name": student.name,
+                        "father_name": student.father_name,
+                        "grandfather_name": student.grandfather_name,
+                        "phone": student.phone,
+                        "class_id": student.school_class_id,
+                        "class_name": student.school_class.name,
+                        "class_year_shamsi": student.school_class.year_shamsi,
+                        "expected_monthly_fee": str(expected),
+                        "paid_monthly_fee": str(paid),
+                        "due_amount": str(due),
+                    }
+                )
+
+        return Response(
+            {
+                "month_shamsi": month_shamsi,
+                "total_due_students": len(results),
+                "results": results,
+            }
+        )
 
 
 def _parse_shamsi_date(value: str) -> jdatetime.date:

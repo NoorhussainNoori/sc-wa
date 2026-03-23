@@ -382,6 +382,51 @@
   font-size: 0.9rem;
 }
 
+.dues-cards {
+  display: grid;
+  gap: 12px;
+}
+
+.due-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  background: #fff;
+}
+
+.due-card-title {
+  font-weight: 800;
+  color: #0f172a;
+  margin-bottom: 10px;
+}
+
+.due-card-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0;
+  color: #0f172a;
+}
+
+.due-card-label {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.due-card-total {
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 10px;
+}
+
+.due-card-total span:last-child {
+  font-weight: 900;
+  color: #1d4ed8;
+}
+
+.due-card-actions {
+  margin-top: 10px;
+}
+
 .checkbox-field {
   display: flex;
   align-items: center;

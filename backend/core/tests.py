@@ -3,6 +3,7 @@ from decimal import Decimal
 import jdatetime
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db.models import Sum
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
@@ -83,3 +84,30 @@ class TestCoreSmokeTests(APITestCase):
         self.assertEqual(res.status_code, 201)
         self.assertEqual(res.data["imported"], 1)
         self.assertEqual(Student.objects.filter(name="Zahid").count(), 1)
+
+    def test_monthly_dues_report(self):
+        # Use the month_shamsi value calculated/stored on the Payment record
+        month_shamsi = self.payment.month_shamsi
+        monthly_fee_types = FeeType.objects.filter(name__icontains="monthly")
+        self.assertTrue(monthly_fee_types.exists())
+        # Sanity check: payment must exist for the month + fee type we expect
+        paid = (
+            Payment.objects.filter(
+                month_shamsi=month_shamsi,
+                fee_type__in=monthly_fee_types,
+                student=self.student,
+            ).aggregate(paid=Sum("amount"))["paid"]
+            or Decimal("0")
+        )
+        self.assertEqual(paid, self.payment.amount)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+        res = self.client.get(f"/api/reports/monthly-dues/?month_shamsi={month_shamsi}")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("results", res.data)
+        self.assertGreaterEqual(len(res.data["results"]), 1)
+        first = res.data["results"][0]
+        self.assertEqual(first["student_id"], self.student.id)
+        expected = self.school_class.monthly_fee
+        due_expected = expected - self.payment.amount
+        self.assertEqual(first["due_amount"], str(due_expected))
