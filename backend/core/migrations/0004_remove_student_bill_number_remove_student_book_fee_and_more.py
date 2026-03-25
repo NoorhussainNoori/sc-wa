@@ -35,13 +35,22 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='payment',
             name='bill_number',
-            field=models.CharField(default=2435464523, max_length=30, validators=[django.core.validators.RegexValidator(message='Only numeric digits are allowed.', regex='^\\d+$')]),
+            field=models.CharField(
+                default='0',
+                max_length=30,
+                validators=[
+                    django.core.validators.RegexValidator(
+                        message='Only numeric digits are allowed.',
+                        regex='^\\d+$',
+                    )
+                ],
+            ),
             preserve_default=False,
         ),
         migrations.AddField(
             model_name='payment',
             name='month_shamsi',
-            field=models.CharField(default=543535636, max_length=7),
+            field=models.CharField(blank=True, default='', max_length=7),
             preserve_default=False,
         ),
         migrations.AddField(
