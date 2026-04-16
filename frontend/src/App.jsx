@@ -10,6 +10,7 @@ import Classes from "./pages/Classes.jsx";
 import Payments from "./pages/Payments.jsx";
 import Expenses from "./pages/Expenses.jsx";
 import Reports from "./pages/Reports.jsx";
+import Backup from "./pages/Backup.jsx";
 import NotFound from "./pages/NotFound.jsx";
 
 function ProtectedRoute({ children }) {
@@ -39,6 +40,7 @@ function App() {
           <Route path="payments" element={<Payments />} />
           <Route path="expenses" element={<Expenses />} />
           <Route path="reports" element={<Reports />} />
+          <Route path="backup" element={<Backup />} />
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>

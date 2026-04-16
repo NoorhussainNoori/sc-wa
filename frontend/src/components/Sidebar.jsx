@@ -8,6 +8,7 @@ const navItems = [
   { to: "/payments", label: "Payments" },
   { to: "/expenses", label: "Expenses" },
   { to: "/reports", label: "Reports" },
+  { to: "/backup", label: "Backup" },
 ];
 
 export default function Sidebar() {

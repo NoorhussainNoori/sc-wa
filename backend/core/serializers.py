@@ -1,5 +1,6 @@
-from rest_framework import serializers
 from django.utils import timezone
+from django_jalali.serializers.serializerfield import JDateField
+from rest_framework import serializers
 
 from .models import (
     Student,
@@ -37,6 +38,8 @@ class FeeTypeSerializer(serializers.ModelSerializer):
 
 
 class PaymentSerializer(serializers.ModelSerializer):
+    # DRF's DateField parses YYYY-MM-DD as Gregorian; Shamsi years like 1404 must use Jalali parsing.
+    date_shamsi = JDateField()
     student_name = serializers.SerializerMethodField()
     fee_type_name = serializers.SerializerMethodField()
     class_name = serializers.SerializerMethodField()
@@ -86,6 +89,7 @@ class ExpenseCategorySerializer(serializers.ModelSerializer):
 
 
 class ExpenseSerializer(serializers.ModelSerializer):
+    date_shamsi = JDateField()
     category_name = serializers.SerializerMethodField()
 
     class Meta:

@@ -1,18 +1,24 @@
 import csv
 import io
+import json
+import os
+import tempfile
 from decimal import Decimal
-
 import jdatetime
+from django.core.management import call_command
 from django.db import transaction
 from django.db.models import Sum, Q
 from django.http import HttpResponse
+from django.utils import timezone
 from openpyxl import load_workbook
 from rest_framework import status
 from rest_framework import viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .backup_fixture import build_dumpdata_backup_json, repair_backup_fixture_shamsi_dates
 from .models import (
     Student,
     Teacher,
@@ -314,7 +320,17 @@ class ReportSummaryView(APIView):
 
 class MonthlyDueFeesView(APIView):
     """
-    Returns students who still owe the class monthly fee for a given Shamsi month.
+    Returns students who still owe monthly and/or transport fees through a given Shamsi month.
+
+    For each fee type, dues are cumulative from month 01 (Hamal) of that Shamsi year through
+    the requested month.
+
+    The breakdown is:
+    - *_fee_previous: sum of shortfalls for all months *before* the requested month
+    - *_fee_current: shortfall for the requested month itself
+    - *_fee: previous + current (backwards‑compatible total)
+    - *_previous_months_count: how many of those previous months still have a balance (>0),
+      for the bill "برج" column on باقیات rows (number of months, not the month name).
     """
 
     def get(self, request):
@@ -337,6 +353,15 @@ class MonthlyDueFeesView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        try:
+            year_int, end_month_int = _parse_shamsi_month(month_shamsi)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        months_in_range = [f"{year_int}-{m:02d}" for m in range(1, end_month_int + 1)]
+        target_month = month_shamsi
+        dues_from_month_shamsi = f"{year_int:04d}-01"
+
         class_id = request.query_params.get("class_id")
 
         monthly_fee_types = FeeType.objects.filter(name__icontains="monthly")
@@ -346,27 +371,92 @@ class MonthlyDueFeesView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        transport_fee_types = FeeType.objects.filter(name__icontains="transport")
+
         students_qs = Student.objects.select_related("school_class").filter(school_class__isnull=False)
         if class_id:
             students_qs = students_qs.filter(school_class_id=class_id)
 
-        paid_rows = (
-            Payment.objects.filter(month_shamsi=month_shamsi, fee_type__in=monthly_fee_types)
-            .values("student_id")
-            .annotate(paid=Sum("amount"))
-        )
-        paid_map = {str(row["student_id"]): row["paid"] for row in paid_rows}
+        student_ids = list(students_qs.values_list("id", flat=True))
+
+        monthly_paid_by_student_month = {}
+        if student_ids:
+            for row in (
+                Payment.objects.filter(
+                    student_id__in=student_ids,
+                    month_shamsi__in=months_in_range,
+                    fee_type__in=monthly_fee_types,
+                )
+                .values("student_id", "month_shamsi")
+                .annotate(paid=Sum("amount"))
+            ):
+                monthly_paid_by_student_month[(row["student_id"], row["month_shamsi"])] = row["paid"]
+
+        transport_paid_by_student_month = {}
+        if student_ids:
+            for row in (
+                Payment.objects.filter(
+                    student_id__in=student_ids,
+                    month_shamsi__in=months_in_range,
+                    fee_type__in=transport_fee_types,
+                )
+                .values("student_id", "month_shamsi")
+                .annotate(paid=Sum("amount"))
+            ):
+                transport_paid_by_student_month[(row["student_id"], row["month_shamsi"])] = row["paid"]
 
         results = []
         for student in students_qs:
-            expected = (
+            expected_monthly = (
                 student.monthly_fee_override
                 if student.monthly_fee_override is not None
                 else student.school_class.monthly_fee
             )
-            paid = paid_map.get(str(student.id)) or Decimal("0")
-            due = expected - paid
-            if due > 0:
+            expected_transport = (
+                student.transport_fee_override
+                if student.transport_fee_override is not None
+                else student.school_class.transport_fee
+            )
+
+            # Totals across the whole Hamal→target period
+            paid_monthly_total = Decimal("0")
+            paid_transport_total = Decimal("0")
+
+            # Split dues into "previous months" vs "current month"
+            due_monthly_previous = Decimal("0")
+            due_monthly_current = Decimal("0")
+            due_transport_previous = Decimal("0")
+            due_transport_current = Decimal("0")
+            monthly_previous_unpaid_months = 0
+            transport_previous_unpaid_months = 0
+
+            sid = student.id
+            for m in months_in_range:
+                paid_m = monthly_paid_by_student_month.get((sid, m)) or Decimal("0")
+                paid_monthly_total += paid_m
+                short_m = max(expected_monthly - paid_m, Decimal("0"))
+                if m == target_month:
+                    due_monthly_current += short_m
+                else:
+                    due_monthly_previous += short_m
+                    if short_m > 0:
+                        monthly_previous_unpaid_months += 1
+
+                paid_t = transport_paid_by_student_month.get((sid, m)) or Decimal("0")
+                paid_transport_total += paid_t
+                short_t = max(expected_transport - paid_t, Decimal("0"))
+                if m == target_month:
+                    due_transport_current += short_t
+                else:
+                    due_transport_previous += short_t
+                    if short_t > 0:
+                        transport_previous_unpaid_months += 1
+
+            due_monthly_total = due_monthly_previous + due_monthly_current
+            due_transport_total = due_transport_previous + due_transport_current
+            total_due = due_monthly_total + due_transport_total
+
+            if total_due > 0:
                 results.append(
                     {
                         "student_id": student.id,
@@ -378,19 +468,261 @@ class MonthlyDueFeesView(APIView):
                         "class_id": student.school_class_id,
                         "class_name": student.school_class.name,
                         "class_year_shamsi": student.school_class.year_shamsi,
-                        "expected_monthly_fee": str(expected),
-                        "paid_monthly_fee": str(paid),
-                        "due_amount": str(due),
+                        "expected_monthly_fee": str(expected_monthly),
+                        "paid_monthly_fee": str(paid_monthly_total),
+                        # Monthly fee dues (previous vs current vs total)
+                        "due_monthly_fee_previous": str(due_monthly_previous),
+                        "due_monthly_fee_current": str(due_monthly_current),
+                        "due_monthly_previous_months_count": monthly_previous_unpaid_months,
+                        "due_monthly_fee": str(due_monthly_total),
+                        "expected_transport_fee": str(expected_transport),
+                        "paid_transport_fee": str(paid_transport_total),
+                        # Transport dues (previous vs current vs total)
+                        "due_transport_fee_previous": str(due_transport_previous),
+                        "due_transport_fee_current": str(due_transport_current),
+                        "due_transport_previous_months_count": transport_previous_unpaid_months,
+                        "due_transport_fee": str(due_transport_total),
+                        "due_amount": str(total_due),
                     }
                 )
 
         return Response(
             {
                 "month_shamsi": month_shamsi,
+                "dues_from_month_shamsi": dues_from_month_shamsi,
+                "months_count": len(months_in_range),
                 "total_due_students": len(results),
                 "results": results,
             }
         )
+
+
+class ClassMonthlyFeesReportView(APIView):
+    """
+    Per-class totals for one Shamsi month: expected fees, paid, remaining, student counts.
+
+    *free_students* counts students whose expected monthly and transport fees are both zero
+    (fee-exempt for this snapshot).
+    """
+
+    def get(self, request):
+        month_shamsi = request.query_params.get("month_shamsi")
+        if not month_shamsi:
+            year = request.query_params.get("year")
+            month = request.query_params.get("month")
+            if year and month:
+                try:
+                    month_shamsi = f"{int(year):04d}-{int(month):02d}"
+                except ValueError:
+                    return Response(
+                        {"detail": "Invalid year/month format."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+        if not month_shamsi:
+            return Response(
+                {"detail": "month_shamsi is required (YYYY-MM)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            _parse_shamsi_month(month_shamsi)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        monthly_fee_types = FeeType.objects.filter(name__icontains="monthly")
+        if not monthly_fee_types.exists():
+            return Response(
+                {"detail": "Monthly FeeType not found. Create a FeeType with 'monthly' in its name."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        transport_fee_types = FeeType.objects.filter(name__icontains="transport")
+
+        rows = []
+        for cls in SchoolClass.objects.all().order_by("year_shamsi", "name"):
+            students = list(Student.objects.filter(school_class=cls))
+            n = len(students)
+            if n == 0:
+                rows.append(
+                    {
+                        "class_id": cls.id,
+                        "class_name": cls.name,
+                        "year_shamsi": cls.year_shamsi,
+                        "class_label": f"{cls.name} ({cls.year_shamsi})",
+                        "student_count": 0,
+                        "total_monthly_expected": "0",
+                        "total_transport_expected": "0",
+                        "total_monthly_paid": "0",
+                        "total_transport_paid": "0",
+                        "total_monthly_remaining": "0",
+                        "total_transport_remaining": "0",
+                        "free_students_count": 0,
+                    }
+                )
+                continue
+
+            sids = [s.id for s in students]
+            monthly_paid_map = {
+                row["student_id"]: row["paid"]
+                for row in Payment.objects.filter(
+                    student_id__in=sids,
+                    month_shamsi=month_shamsi,
+                    fee_type__in=monthly_fee_types,
+                )
+                .values("student_id")
+                .annotate(paid=Sum("amount"))
+            }
+            transport_paid_map = {
+                row["student_id"]: row["paid"]
+                for row in Payment.objects.filter(
+                    student_id__in=sids,
+                    month_shamsi=month_shamsi,
+                    fee_type__in=transport_fee_types,
+                )
+                .values("student_id")
+                .annotate(paid=Sum("amount"))
+            }
+
+            total_m_exp = Decimal("0")
+            total_t_exp = Decimal("0")
+            total_m_paid = Decimal("0")
+            total_t_paid = Decimal("0")
+            total_m_rem = Decimal("0")
+            total_t_rem = Decimal("0")
+            free_students = 0
+
+            for s in students:
+                exp_m = (
+                    s.monthly_fee_override if s.monthly_fee_override is not None else cls.monthly_fee
+                )
+                exp_t = (
+                    s.transport_fee_override if s.transport_fee_override is not None else cls.transport_fee
+                )
+                paid_m = monthly_paid_map.get(s.id) or Decimal("0")
+                paid_t = transport_paid_map.get(s.id) or Decimal("0")
+                total_m_exp += exp_m
+                total_t_exp += exp_t
+                total_m_paid += paid_m
+                total_t_paid += paid_t
+                total_m_rem += max(exp_m - paid_m, Decimal("0"))
+                total_t_rem += max(exp_t - paid_t, Decimal("0"))
+                if exp_m == 0 and exp_t == 0:
+                    free_students += 1
+
+            rows.append(
+                {
+                    "class_id": cls.id,
+                    "class_name": cls.name,
+                    "year_shamsi": cls.year_shamsi,
+                    "class_label": f"{cls.name} ({cls.year_shamsi})",
+                    "student_count": n,
+                    "total_monthly_expected": str(total_m_exp),
+                    "total_transport_expected": str(total_t_exp),
+                    "total_monthly_paid": str(total_m_paid),
+                    "total_transport_paid": str(total_t_paid),
+                    "total_monthly_remaining": str(total_m_rem),
+                    "total_transport_remaining": str(total_t_rem),
+                    "free_students_count": free_students,
+                }
+            )
+
+        return Response({"month_shamsi": month_shamsi, "classes": rows})
+
+
+_BACKUP_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+
+class BackupExportView(APIView):
+    """
+    Download full school data as JSON (users, API tokens, core app).
+    Same format as `python manage.py export_backup <file>`.
+    """
+
+    def get(self, request):
+        raw = build_dumpdata_backup_json().encode("utf-8")
+        filename = f"school_rasool_backup_{timezone.now().strftime('%Y%m%d_%H%M%S')}.json"
+        response = HttpResponse(raw, content_type="application/json; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+
+class BackupRestoreView(APIView):
+    """
+    Upload a backup JSON file. Clears the database, then loads the fixture.
+    Requires multipart field `confirm` = RESTORE and `file` = backup .json
+    """
+
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        if request.data.get("confirm") != "RESTORE":
+            return Response(
+                {
+                    "detail": "Restore refused. Send form field confirm=RESTORE (exact text) together with the file.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        upload = request.FILES.get("file")
+        if not upload:
+            return Response({"detail": "Missing file field."}, status=status.HTTP_400_BAD_REQUEST)
+
+        body = upload.read()
+        if len(body) > _BACKUP_MAX_UPLOAD_BYTES:
+            return Response({"detail": "Backup file is too large."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            decoded = body.decode("utf-8")
+            parsed = json.loads(decoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return Response(
+                {"detail": f"File is not valid UTF-8 JSON: {exc}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(parsed, list) or (parsed and not isinstance(parsed[0], dict)):
+            return Response(
+                {"detail": "Invalid backup format (expected a JSON array)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if parsed and "model" not in parsed[0]:
+            return Response(
+                {"detail": "Invalid backup format (missing model keys)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        repair_backup_fixture_shamsi_dates(parsed)
+        fixed_body = json.dumps(parsed, indent=2, ensure_ascii=False).encode("utf-8")
+
+        fd, path = tempfile.mkstemp(suffix=".json")
+        try:
+            with os.fdopen(fd, "wb") as tmp:
+                tmp.write(fixed_body)
+            try:
+                call_command("flush", interactive=False)
+            except Exception as exc:  # noqa: BLE001
+                return Response(
+                    {"detail": f"Could not clear database: {exc}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+            try:
+                call_command("loaddata", path)
+            except Exception as exc:  # noqa: BLE001
+                return Response(
+                    {
+                        "detail": (
+                            "Restore failed after the database was cleared. "
+                            f"Re-import this or another backup file. Error: {exc}"
+                        ),
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+        return Response({"detail": "Backup restored successfully. Log in again if your session was reset."})
 
 
 def _parse_shamsi_date(value: str) -> jdatetime.date:

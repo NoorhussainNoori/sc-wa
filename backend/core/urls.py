@@ -11,6 +11,9 @@ from .views import (
     ExpenseViewSet,
     ReportSummaryView,
     MonthlyDueFeesView,
+    ClassMonthlyFeesReportView,
+    BackupExportView,
+    BackupRestoreView,
 )
 
 router = DefaultRouter()
@@ -26,4 +29,11 @@ urlpatterns = [
     path("", include(router.urls)),
     path("reports/summary/", ReportSummaryView.as_view(), name="report-summary"),
     path("reports/monthly-dues/", MonthlyDueFeesView.as_view(), name="report-monthly-dues"),
+    path(
+        "reports/class-monthly-fees/",
+        ClassMonthlyFeesReportView.as_view(),
+        name="report-class-monthly-fees",
+    ),
+    path("backup/export/", BackupExportView.as_view(), name="backup-export"),
+    path("backup/restore/", BackupRestoreView.as_view(), name="backup-restore"),
 ]

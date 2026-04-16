@@ -254,6 +254,19 @@
   color: #1e293b;
 }
 
+.button-danger {
+  background: linear-gradient(135deg, #b91c1c 0%, #dc2626 100%);
+  color: #fff;
+  box-shadow: 0 10px 20px rgba(220, 38, 38, 0.22);
+}
+
+.button-danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 .button:hover {
   transform: translateY(-1px);
 }

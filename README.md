@@ -29,6 +29,17 @@ This is a full-stack app:
 
 - Backend: `python backend/manage.py test`
 
+## Demo seed data (backup testing)
+
+From `backend/`: `python manage.py seed_demo` creates demo classes, students, teachers, fee types, payments, and expenses (tags: `DEMO-*` registrations, `Demo …` names). Run again safely; use `python manage.py seed_demo --replace` to delete that demo data and re-insert. Then export a backup, flush the DB, and `import_backup` (or the Backup UI) to confirm restore.
+
+## Backup and restore
+
+- **UI:** Log in → **Backup** in the sidebar → download `.json` or upload a previously saved file to restore.
+- **CLI:** From `backend/`: `python manage.py export_backup path/to/backup.json` and `python manage.py import_backup path/to/backup.json` (default: flush DB then load; use `--no-flush` only if you know you need it).
+- Restore **replaces all data** in the database. If restore fails after the flush, load a valid backup again. Backups may not load after migrations until you export a fresh file from the new schema.
+- **Shamsi dates in JSON:** older exports could list payment/expense `date_shamsi` with a wrong year (e.g. `783-…` instead of `1404-…`). Export/import and the Backup UI now fix that automatically so those files load correctly.
+
 ## Docker Deployment (Mac mini / Production-style)
 
 This Docker setup uses **PostgreSQL** and can run with **zero manual config**.

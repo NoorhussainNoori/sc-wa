@@ -12,6 +12,39 @@ const emptyClass = {
   book_fee: "",
 };
 
+/** Solar Hijri (Shamsi) month names as used in Dari — 1–12. */
+const SHAMSI_MONTHS = [
+  { value: "01", dari: "حمل", latin: "Hamal" },
+  { value: "02", dari: "ثور", latin: "Sawer" },
+  { value: "03", dari: "جوزا", latin: "Jawza" },
+  { value: "04", dari: "سرطان", latin: "Saratan" },
+  { value: "05", dari: "اسد", latin: "Aasd" },
+  { value: "06", dari: "سنبله", latin: "Sanbula" },
+  { value: "07", dari: "میزان", latin: "Mizan" },
+  { value: "08", dari: "عقرب", latin: "Aqrab" },
+  { value: "09", dari: "قوس", latin: "Qawss" },
+  { value: "10", dari: "جدی", latin: "Jadi" },
+  { value: "11", dari: "دلو", latin: "Dalwa" },
+  { value: "12", dari: "حوت", latin: "Hoot" },
+];
+
+function formatMonthShamsiWithNames(monthShamsi) {
+  if (!monthShamsi || !/^\d{4}-\d{2}$/.test(monthShamsi)) {
+    return monthShamsi || "";
+  }
+  const [y, mon] = monthShamsi.split("-");
+  const entry = SHAMSI_MONTHS.find((m) => m.value === mon);
+  const namePart = entry ? `${entry.dari} ${entry.latin}` : mon;
+  return `${y}-${mon} — ${namePart}`;
+}
+
+/** Dari month name only (برج), for bill tables. */
+function formatDariMonthBurj(monthShamsi) {
+  if (!monthShamsi || !/^\d{4}-\d{2}$/.test(monthShamsi)) return "—";
+  const mon = monthShamsi.split("-")[1];
+  return SHAMSI_MONTHS.find((m) => m.value === mon)?.dari || mon;
+}
+
 export default function Classes() {
   const PAGE_SIZE = 10;
   const RECEIPT_TEMPLATE_KEY = "receipt_template_config_v1";
@@ -36,6 +69,7 @@ export default function Classes() {
   const [dues, setDues] = useState([]);
   const [duesError, setDuesError] = useState("");
   const [duesLoading, setDuesLoading] = useState(false);
+  const [duesPeriodSummary, setDuesPeriodSummary] = useState(null);
 
   const escapeHtml = (value) => {
     const str = value === null || value === undefined ? "" : String(value);
@@ -126,15 +160,23 @@ export default function Classes() {
         `/reports/monthly-dues/?${params.toString()}`
       );
       setDues(data.results || []);
+      setDuesPeriodSummary({
+        from: data.dues_from_month_shamsi,
+        through: data.month_shamsi,
+        monthsCount: data.months_count,
+      });
     } catch (err) {
       setDuesError(err.message || "Failed to load dues.");
       setDues([]);
+      setDuesPeriodSummary(null);
     } finally {
       setDuesLoading(false);
     }
   };
 
   const printDuesWindow = ({ title, duesToPrint, monthShamsi }) => {
+    const monthLine = formatMonthShamsiWithNames(monthShamsi);
+    const burj = formatDariMonthBurj(monthShamsi);
     const receiptWindow = window.open("", "_blank", "width=900,height=900");
     if (!receiptWindow) return;
 
@@ -144,6 +186,10 @@ export default function Classes() {
       schoolPhone: "0700 000 000",
       thankYouMessage: "Thank you for your attention and timely payment.",
       logoDataUrl: "",
+      dariBillTitle: "لیسه خصوصی وطن آکسفور\u0689 فیس بل",
+      englishFeesBillLine: "Watan Oxford High School FeesBill",
+      dariBillFooterNote:
+        "یاداشت: والدین گرامی در تحویلی فیس فرزندان تان کوشش نماید تا در وقت معین فیس مذکور را تادیه نموده تا همکار با آداره لیسه در زمینه معاشات استادان باشید.",
     };
 
     let template = defaultTemplate;
@@ -156,6 +202,11 @@ export default function Classes() {
       template = defaultTemplate;
     }
 
+    const englishBillLine =
+      template.englishFeesBillLine && String(template.englishFeesBillLine).trim()
+        ? template.englishFeesBillLine
+        : `${template.schoolName} FeesBill`;
+
     const logoSvg = `
       <svg width="56" height="56" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
         <rect width="64" height="64" rx="16" fill="#1D4ED8"/>
@@ -164,43 +215,103 @@ export default function Classes() {
         <circle cx="32" cy="32" r="4" fill="#38BDF8"/>
       </svg>
     `;
+    const logoBlock = template.logoDataUrl
+      ? `<img class="bill-logo-img" alt="" src="${escapeHtml(template.logoDataUrl)}" />`
+      : `<div class="bill-logo-fallback">${logoSvg}</div>`;
 
     const receipts = duesToPrint.map((d) => {
       const classLabel = `${d.class_name} (${d.class_year_shamsi})`;
+      const dueMonthlyPrev = d.due_monthly_fee_previous ?? "";
+      const dueMonthlyCurr = d.due_monthly_fee_current ?? "";
+      const dueTransportPrev = d.due_transport_fee_previous ?? "";
+      const dueTransportCurr = d.due_transport_fee_current ?? "";
+      const burjMonthlyPrevCount =
+        d.due_monthly_previous_months_count != null
+          ? String(d.due_monthly_previous_months_count)
+          : "";
+      const burjTransportPrevCount =
+        d.due_transport_previous_months_count != null
+          ? String(d.due_transport_previous_months_count)
+          : "";
+      const totalDue = d.due_amount ?? "";
       return `
-        <div class="receipt-half">
-          <div class="receipt-header">
-            <div class="receipt-logo">
-              <img class="receipt-logo-img" alt="Logo" src="${escapeHtml(template.logoDataUrl || "")}" />
-              <div class="receipt-logo-default">${logoSvg}</div>
+        <div class="receipt-half fees-bill-wrap">
+          <div class="bill-header-main">
+            <div class="bill-logo-wrap">${logoBlock}</div>
+            <div class="bill-header-text">
+              <div class="bill-title-dari">${escapeHtml(
+                template.dariBillTitle || defaultTemplate.dariBillTitle
+              )}</div>
+              <div class="bill-title-en">${escapeHtml(englishBillLine)}</div>
+              <div class="bill-header-meta">
+                <span>${escapeHtml(template.schoolAddress)}</span>
+                <span>${escapeHtml(template.schoolPhone)}</span>
+              </div>
+              <div class="bill-period">
+                <span class="bill-period-label">Month:</span> ${escapeHtml(monthLine)}
+              </div>
             </div>
-            <div class="receipt-header-text">
-              <div class="school-name">${escapeHtml(template.schoolName)}</div>
-              <div class="school-address">${escapeHtml(template.schoolAddress)}</div>
-              <div class="school-phone">${escapeHtml(template.schoolPhone)}</div>
-            </div>
           </div>
 
-          <div class="receipt-title">Due Fees Notice</div>
-          <div class="receipt-subtitle">Month: <span>${escapeHtml(monthShamsi)}</span></div>
+          <table class="bill-table bill-meta" dir="ltr">
+            <tbody>
+              <tr>
+                <th scope="row" class="bill-th">Name/اسم</th>
+                <td class="bill-td" colspan="2">${escapeHtml(d.student_name)}</td>
+                <th scope="row" class="bill-th">FatherName/اسم پدر</th>
+                <td class="bill-td" colspan="2">${escapeHtml(d.father_name)}</td>
+                <th scope="row" class="bill-th">Class/صنف</th>
+                <td class="bill-td">${escapeHtml(classLabel)}</td>
+              </tr>
+            </tbody>
+          </table>
 
-          <div class="receipt-block">
-            <div><span class="label">Student:</span> <span>${escapeHtml(d.student_name)}</span></div>
-            <div><span class="label">Reg No:</span> <span>${escapeHtml(d.registration_number || "-")}</span></div>
-            <div><span class="label">Father:</span> <span>${escapeHtml(d.father_name)}</span></div>
-            <div><span class="label">Phone:</span> <span>${escapeHtml(d.phone)}</span></div>
-            <div><span class="label">Class:</span> <span>${escapeHtml(classLabel)}</span></div>
-          </div>
+          <table class="bill-table bill-fees" dir="ltr">
+            <thead>
+              <tr>
+                <th scope="col" class="bill-th bill-col-note">ملاحظه شد</th>
+                <th scope="col" class="bill-th bill-col-amt" colspan="2">مبلغ قابل تادیه</th>
+                <th scope="col" class="bill-th bill-col-burj">برج</th>
+                <th scope="col" class="bill-th bill-col-subject" colspan="4">موضوع فیس</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="bill-td bill-col-note"></td>
+                <td class="bill-td bill-amt" colspan="2">${escapeHtml(dueMonthlyCurr)}</td>
+                <td class="bill-td bill-col-burj">${escapeHtml(burj)}</td>
+                <td class="bill-td bill-col-subject" colspan="4">فیس پیش پرداخت برج</td>
+              </tr>
+              <tr>
+                <td class="bill-td bill-col-note"></td>
+                <td class="bill-td bill-amt" colspan="2">${escapeHtml(dueMonthlyPrev)}</td>
+                <td class="bill-td bill-col-burj">${escapeHtml(burjMonthlyPrevCount)}</td>
+                <td class="bill-td bill-col-subject" colspan="4">فیس باقیات برج/بروج </td>
+              </tr>
+              <tr>
+                <td class="bill-td bill-col-note"></td>
+                <td class="bill-td bill-amt" colspan="2">${escapeHtml(dueTransportCurr)}</td>
+                <td class="bill-td bill-col-burj">${escapeHtml(burj)}</td>
+                <td class="bill-td bill-col-subject" colspan="4">فیس ترانسپور\u067C</td>
+              </tr>
+              <tr>
+                <td class="bill-td bill-col-note"></td>
+                <td class="bill-td bill-amt" colspan="2">${escapeHtml(dueTransportPrev)}</td>
+                <td class="bill-td bill-col-burj">${escapeHtml(burjTransportPrevCount)}</td>
+                <td class="bill-td bill-col-subject" colspan="4">فیس باقیات ترانسپور\u067C</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr class="bill-tfoot-row">
+                <td class="bill-td bill-amt bill-td-grand" colspan="3">${escapeHtml(totalDue)}</td>
+                <td class="bill-th bill-td-jumlah">جمله شد</td>
+                <td class="bill-td bill-td-paydate" colspan="4">تاریخ تادیه مبلغ:</td>
+              </tr>
+            </tfoot>
+          </table>
 
-          <div class="receipt-table">
-            <div class="row"><div>Expected Monthly Fee</div><div class="value">${escapeHtml(d.expected_monthly_fee)}</div></div>
-            <div class="row"><div>Paid for Month</div><div class="value">${escapeHtml(d.paid_monthly_fee)}</div></div>
-            <div class="row total"><div>Due Amount</div><div class="due-value">${escapeHtml(d.due_amount)}</div></div>
-          </div>
-
-          <div class="receipt-footer">
-            <div class="thank-you">${escapeHtml(template.thankYouMessage)}</div>
-          </div>
+          <div class="bill-footer-dari">${escapeHtml(template.dariBillFooterNote || defaultTemplate.dariBillFooterNote)}</div>
+          <div class="bill-footer-en">${escapeHtml(template.thankYouMessage)}</div>
         </div>
       `;
     });
@@ -228,10 +339,11 @@ export default function Classes() {
     const html = `
       <html>
         <head>
+          <meta charset="utf-8" />
           <title>${escapeHtml(title)}</title>
           <style>
             @page { size: A4; margin: 10mm; }
-            body { font-family: "Segoe UI", Arial, sans-serif; color: #0f172a; }
+            body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #0f172a; }
             .btn { padding: 10px 12px; border-radius: 10px; border: 1px solid #cbd5f5; background:#fff; cursor:pointer; font-weight:600; }
             .a4-page { page-break-after: always; }
             .page-halves {
@@ -251,24 +363,42 @@ export default function Classes() {
               line-height: 1.2;
             }
             .receipt-half.empty { border-style: dashed; background: #f8fafc; }
-            .receipt-header { display:flex; gap: 12px; align-items:flex-start; }
-            .receipt-logo { flex: 0 0 auto; display: grid; place-items: start; }
-            .receipt-logo-img { width:56px; height:56px; display:${template.logoDataUrl ? "block" : "none"}; object-fit: contain; }
-            .receipt-logo-default { display: ${template.logoDataUrl ? "none" : "block"}; }
-            .receipt-header-text { flex: 1; }
-            .school-name { font-weight: 800; font-size: 1.05rem; margin-bottom: 4px; }
-            .school-address { font-size: 0.85rem; color: #475569; }
-            .school-phone { font-size: 0.85rem; color: #475569; margin-top: 4px; }
-            .receipt-title { margin-top: 10px; font-weight: 800; font-size: 1rem; }
-            .receipt-subtitle { font-size: 0.9rem; color:#475569; margin-top: 4px; }
-            .receipt-block { margin-top: 12px; display:grid; gap: 6px; font-size:0.92rem; }
-            .label { color:#64748b; font-weight: 600; margin-right: 6px; }
-            .receipt-table { margin-top: 12px; border-top: 1px dashed #e2e8f0; padding-top: 8px; display:grid; gap: 7px; }
-            .receipt-table .row { display:flex; justify-content: space-between; gap: 10px; }
-            .receipt-table .total { border-top: 2px solid #dbeafe; padding-top: 10px; }
-            .receipt-table .value { font-weight: 700; }
-            .receipt-table .due-value { font-weight: 900; color:#1d4ed8; font-size: 1.05rem; }
-            .receipt-footer { margin-top: auto; font-size: 0.85rem; color:#475569; padding-top: 10px; }
+            .fees-bill-wrap { line-height: 1.35; }
+            .bill-header-main {
+              display: flex;
+              align-items: flex-start;
+              gap: 12px;
+              margin-bottom: 10px;
+            }
+            .bill-logo-wrap { flex: 0 0 auto; }
+            .bill-logo-img { width: 56px; height: 56px; border-radius: 12px; object-fit: contain; display: block; }
+            .bill-logo-fallback { width: 56px; height: 56px; display: block; }
+            .bill-logo-fallback svg { width: 56px; height: 56px; display: block; }
+            .bill-header-text { flex: 1; min-width: 0; }
+            .bill-title-dari { font-size: 15px; font-weight: 800; margin: 0; text-align: right; direction: rtl; }
+            .bill-title-en { font-size: 13px; font-weight: 600; margin: 4px 0 0; text-align: right; }
+            .bill-header-meta {
+              margin-top: 4px;
+              display: flex;
+              flex-direction: column;
+              gap: 2px;
+              font-size: 11px;
+              color: #475569;
+              text-align: right;
+            }
+            .bill-period { font-size: 11px; color: #475569; margin-top: 6px; text-align: right; }
+            .bill-period-label { font-weight: 600; }
+            .bill-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 6px; }
+            .bill-table th, .bill-table td { border: 1px solid #1e293b; padding: 6px 8px; vertical-align: middle; }
+            .bill-th { background: #f1f5f9; font-weight: 600; }
+            .bill-amt { text-align: center; font-weight: 600; }
+            .bill-col-subject { direction: rtl; text-align: right; }
+            .bill-col-burj { text-align: center; min-width: 3.5rem; }
+            .bill-td-grand { font-size: 14px; font-weight: 800; }
+            .bill-td-paydate { min-height: 2rem; vertical-align: top; }
+            .bill-td-jumlah { text-align: center; white-space: nowrap; }
+            .bill-footer-dari { margin-top: 10px; font-size: 10px; line-height: 1.45; text-align: justify; direction: rtl; }
+            .bill-footer-en { margin-top: 6px; font-size: 10px; color: #64748b; text-align: center; }
             @media print { .receipt-half { border-radius: 10px; } .print-tools { display:none !important; } }
           </style>
         </head>
@@ -512,6 +642,26 @@ export default function Classes() {
       ) : (
         <div className="panel">
           <h3>Monthly Fee Dues</h3>
+          <p className="muted-panel" style={{ marginTop: 4, marginBottom: 12 }}>
+            {buildMonthShamsi() ? (
+              <>
+                Reference month: {formatMonthShamsiWithNames(buildMonthShamsi())}. Baqiāt (remaining) fees are
+                cumulative from month 01 (حمل) of that Shamsi year through this month: for each month, tuition
+                and transport due are (class rate minus payments recorded for that Shamsi month), then summed.
+                {duesPeriodSummary &&
+                duesPeriodSummary.through === buildMonthShamsi() &&
+                !duesLoading ? (
+                  <>
+                    {" "}
+                    Last loaded: {duesPeriodSummary.monthsCount} month(s) (
+                    {duesPeriodSummary.from} → {duesPeriodSummary.through}).
+                  </>
+                ) : null}
+              </>
+            ) : (
+              "Enter year and month. Month names are Shamsi (Dari)."
+            )}
+          </p>
           <div className="form-grid" style={{ marginBottom: 8 }}>
             <Field label="Year (YYYY)">
               <input
@@ -527,14 +677,11 @@ export default function Classes() {
                 value={dueMonth}
                 onChange={(event) => setDueMonth(event.target.value)}
               >
-                {Array.from({ length: 12 }).map((_, i) => {
-                  const v = String(i + 1).padStart(2, "0");
-                  return (
-                    <option key={v} value={v}>
-                      {v}
-                    </option>
-                  );
-                })}
+                {SHAMSI_MONTHS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.value} — {m.dari} {m.latin}
+                  </option>
+                ))}
               </select>
             </Field>
             <Field label="Class">
@@ -577,7 +724,7 @@ export default function Classes() {
           <div className="dues-cards">
             {dues.map((d) => (
               <div className="due-card" key={d.student_id}>
-                <div className="due-card-title">Monthly Fee Due</div>
+                <div className="due-card-title">Monthly & transport due</div>
                 <div className="due-card-row">
                   <span className="due-card-label">Student</span>
                   <span>{d.student_name}</span>
@@ -587,21 +734,21 @@ export default function Classes() {
                   <span>{d.father_name}</span>
                 </div>
                 <div className="due-card-row">
-                  <span className="due-card-label">Reg No</span>
-                  <span>{d.registration_number || "—"}</span>
-                </div>
-                <div className="due-card-row">
-                  <span className="due-card-label">Phone</span>
-                  <span>{d.phone}</span>
-                </div>
-                <div className="due-card-row">
                   <span className="due-card-label">Class</span>
                   <span>
                     {d.class_name} ({d.class_year_shamsi})
                   </span>
                 </div>
+                <div className="due-card-row">
+                  <span className="due-card-label">Due monthly</span>
+                  <span>{d.due_monthly_fee}</span>
+                </div>
+                <div className="due-card-row">
+                  <span className="due-card-label">Due transport</span>
+                  <span>{d.due_transport_fee}</span>
+                </div>
                 <div className="due-card-row due-card-total">
-                  <span className="due-card-label">Due Amount</span>
+                  <span className="due-card-label">Total due</span>
                   <span>{d.due_amount}</span>
                 </div>
                 <div className="due-card-actions">

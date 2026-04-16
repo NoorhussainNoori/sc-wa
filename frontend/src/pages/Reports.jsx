@@ -19,12 +19,25 @@ export default function Reports() {
     schoolPhone: "0700 000 000",
     thankYouMessage: "Thank you for your attention and timely payment.",
     logoDataUrl: "",
+    dariBillTitle: "لیسه خصوصی وطن آکسفور\u0689 فیس بل",
+    englishFeesBillLine: "Watan Oxford High School FeesBill",
+    dariBillFooterNote:
+      "یاداشت: والدین گرامی در تحویلی فیس فرزندان تان کوشش نماید تا در وقت معین فیس مذکور را تادیه نموده تا همکار با آداره لیسه در زمینه معاشات استادان باشید.",
   };
   const [filters, setFilters] = useState(defaultFilters);
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
   const [loadingReport, setLoadingReport] = useState(false);
   const [activeTab, setActiveTab] = useState("summary");
+  const [classMonthShamsi, setClassMonthShamsi] = useState("");
+  const [classMonthReport, setClassMonthReport] = useState(null);
+  const [classMonthError, setClassMonthError] = useState("");
+  const [loadingClassMonth, setLoadingClassMonth] = useState(false);
+
+  const classFeesGridStyle = {
+    gridTemplateColumns: "minmax(150px, 1.3fr) 72px repeat(7, minmax(86px, 1fr)) 64px",
+    minWidth: "920px",
+  };
   const [templateStatus, setTemplateStatus] = useState("");
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [template, setTemplate] = useState(() => {
@@ -62,6 +75,140 @@ export default function Reports() {
     } finally {
       setLoadingReport(false);
     }
+  };
+
+  const fetchClassMonthReport = async () => {
+    setClassMonthError("");
+    const m = String(classMonthShamsi || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(m)) {
+      setClassMonthError("Enter Shamsi month as YYYY-MM (e.g. 1404-01).");
+      return;
+    }
+    setLoadingClassMonth(true);
+    try {
+      const params = new URLSearchParams({ month_shamsi: m });
+      const data = await apiFetch(`/reports/class-monthly-fees/?${params.toString()}`);
+      setClassMonthReport(data);
+    } catch (err) {
+      setClassMonthError(err.message || "Failed to load class report.");
+      setClassMonthReport(null);
+    } finally {
+      setLoadingClassMonth(false);
+    }
+  };
+
+  const exportClassMonthCsv = () => {
+    if (!classMonthReport?.classes) return;
+    const lines = [];
+    lines.push(`School,${template.schoolName}`);
+    lines.push("Report,Class monthly fees (one Shamsi month)");
+    lines.push(`Month (Shamsi),${classMonthReport.month_shamsi}`);
+    lines.push("");
+    lines.push(
+      [
+        "Class",
+        "Students",
+        "Monthly fees (total)",
+        "Transport fees (total)",
+        "Monthly paid",
+        "Transport paid",
+        "Monthly remaining",
+        "Transport remaining",
+        "Free students",
+      ].join(",")
+    );
+    (classMonthReport.classes || []).forEach((row) => {
+      lines.push(
+        [
+          `"${String(row.class_label || "").replaceAll('"', '""')}"`,
+          row.student_count,
+          row.total_monthly_expected,
+          row.total_transport_expected,
+          row.total_monthly_paid,
+          row.total_transport_paid,
+          row.total_monthly_remaining,
+          row.total_transport_remaining,
+          row.free_students_count,
+        ].join(",")
+      );
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `class_monthly_fees_${classMonthReport.month_shamsi}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const printClassMonthReport = () => {
+    if (!classMonthReport?.classes) return;
+    const reportWindow = window.open("", "_blank", "width=1100,height=900");
+    if (!reportWindow) return;
+    const headCells = [
+      "Class",
+      "Students",
+      "Monthly (total)",
+      "Transport (total)",
+      "Monthly paid",
+      "Transport paid",
+      "Monthly remaining",
+      "Transport remaining",
+      "Free",
+    ];
+    const headerRow = `<tr>${headCells.map((h) => `<th>${h}</th>`).join("")}</tr>`;
+    const bodyRows = (classMonthReport.classes || [])
+      .map(
+        (r) => `
+      <tr>
+        <td>${String(r.class_label || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</td>
+        <td style="text-align:right">${r.student_count}</td>
+        <td style="text-align:right">${r.total_monthly_expected}</td>
+        <td style="text-align:right">${r.total_transport_expected}</td>
+        <td style="text-align:right">${r.total_monthly_paid}</td>
+        <td style="text-align:right">${r.total_transport_paid}</td>
+        <td style="text-align:right">${r.total_monthly_remaining}</td>
+        <td style="text-align:right">${r.total_transport_remaining}</td>
+        <td style="text-align:right">${r.free_students_count}</td>
+      </tr>`
+      )
+      .join("");
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Class fees ${classMonthReport.month_shamsi}</title>
+          <style>
+            body { font-family: "Segoe UI", Arial, sans-serif; padding: 24px; color: #0f172a; }
+            h1 { font-size: 1.25rem; margin: 0 0 8px; }
+            .muted { color: #64748b; font-size: 0.9rem; margin-bottom: 16px; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th, td { border: 1px solid #e2e8f0; padding: 8px; }
+            th { background: #f8fafc; text-align: left; }
+            td:nth-child(n + 2) { text-align: right; }
+            .note { margin-top: 16px; font-size: 11px; color: #64748b; max-width: 720px; }
+          </style>
+        </head>
+        <body>
+          <h1>${String(template.schoolName || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</h1>
+          <div class="muted">Class monthly fees — Shamsi month ${classMonthReport.month_shamsi}</div>
+          <table>
+            <thead>${headerRow}</thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+          <p class="note">
+            Free students: students with 0 monthly and 0 transport fee (class defaults or overrides).
+            Remaining is per student max(expected − paid, 0), summed for the class for this month only.
+          </p>
+        </body>
+      </html>
+    `;
+    reportWindow.document.write(html);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
   };
 
   const onTemplateChange = (field) => (event) => {
@@ -245,11 +392,21 @@ export default function Reports() {
       <div className="page-header">
         <div>
           <h2>Reports</h2>
-          <p>Revenue, expenses, and profit with flexible date ranges.</p>
+          <p>
+            {activeTab === "summary"
+              ? "Revenue, expenses, and profit with flexible date ranges."
+              : activeTab === "classMonth"
+                ? "Per-class tuition and transport totals for one Shamsi month."
+                : "Receipt appearance for printed bills."}
+          </p>
         </div>
         {activeTab === "summary" ? (
           <button className="button button-primary" onClick={fetchReport} disabled={loadingReport}>
             {loadingReport ? "Generating..." : "Generate Report"}
+          </button>
+        ) : activeTab === "classMonth" ? (
+          <button className="button button-primary" onClick={fetchClassMonthReport} disabled={loadingClassMonth}>
+            {loadingClassMonth ? "Generating..." : "Generate Report"}
           </button>
         ) : (
           <button className="button button-primary" onClick={saveTemplate} disabled={savingTemplate}>
@@ -267,6 +424,13 @@ export default function Reports() {
           Summary Report
         </button>
         <button
+          className={activeTab === "classMonth" ? "button button-primary" : "button button-outline"}
+          type="button"
+          onClick={() => setActiveTab("classMonth")}
+        >
+          Class monthly fees
+        </button>
+        <button
           className={activeTab === "template" ? "button button-primary" : "button button-outline"}
           type="button"
           onClick={() => setActiveTab("template")}
@@ -282,6 +446,17 @@ export default function Reports() {
           </button>
           <button className="button button-outline" type="button" onClick={exportReportPdf}>
             Export PDF
+          </button>
+        </div>
+      ) : null}
+
+      {activeTab === "classMonth" && classMonthReport?.classes ? (
+        <div className="inline-actions">
+          <button className="button button-outline" type="button" onClick={exportClassMonthCsv}>
+            Export CSV
+          </button>
+          <button className="button button-outline" type="button" onClick={printClassMonthReport}>
+            Print
           </button>
         </div>
       ) : null}
@@ -392,7 +567,66 @@ export default function Reports() {
         </div>
       ) : null}
       </>
-      ) : (
+      ) : null}
+
+      {activeTab === "classMonth" ? (
+        <>
+          <div className="panel">
+            <h3>Class monthly fees</h3>
+            <p className="muted-panel" style={{ marginBottom: 12 }}>
+              Select a Shamsi month (YYYY-MM). Each row is one class: student count, total expected monthly and
+              transport fees, amounts paid for that month (Monthly / Transport fee types), remaining balances, and
+              students with no monthly and no transport fee.
+            </p>
+            <div className="form-grid">
+              <Field label="Shamsi month (YYYY-MM)">
+                <input
+                  className="input"
+                  value={classMonthShamsi}
+                  onChange={(event) => setClassMonthShamsi(event.target.value)}
+                  placeholder="1404-01"
+                />
+              </Field>
+            </div>
+            {loadingClassMonth ? <div className="status-message">Generating report...</div> : null}
+            {classMonthError ? <div className="form-error">{classMonthError}</div> : null}
+          </div>
+
+          {classMonthReport?.classes?.length ? (
+            <div className="panel" style={{ overflowX: "auto" }}>
+              <h3>Results — {classMonthReport.month_shamsi}</h3>
+              <div className="table">
+                <div className="table-head" style={classFeesGridStyle}>
+                  <div>Class</div>
+                  <div>Students</div>
+                  <div>Monthly fees</div>
+                  <div>Transport fees</div>
+                  <div>Monthly paid</div>
+                  <div>Transport paid</div>
+                  <div>Monthly left</div>
+                  <div>Transport left</div>
+                  <div>Free</div>
+                </div>
+                {classMonthReport.classes.map((row) => (
+                  <div className="table-row" key={row.class_id} style={classFeesGridStyle}>
+                    <div>{row.class_label}</div>
+                    <div>{row.student_count}</div>
+                    <div>{row.total_monthly_expected}</div>
+                    <div>{row.total_transport_expected}</div>
+                    <div>{row.total_monthly_paid}</div>
+                    <div>{row.total_transport_paid}</div>
+                    <div>{row.total_monthly_remaining}</div>
+                    <div>{row.total_transport_remaining}</div>
+                    <div>{row.free_students_count}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {activeTab === "template" ? (
         <div className="panel">
           <h3>Receipt Template Settings</h3>
           <div className="form-grid">
@@ -407,6 +641,26 @@ export default function Reports() {
             </Field>
             <Field label="Thank You Message">
               <input className="input" value={template.thankYouMessage} onChange={onTemplateChange("thankYouMessage")} />
+            </Field>
+            <Field label="Dari fees bill title (print)">
+              <input className="input" value={template.dariBillTitle || ""} onChange={onTemplateChange("dariBillTitle")} dir="rtl" />
+            </Field>
+            <Field label="English fees bill line (print, optional)">
+              <input
+                className="input"
+                value={template.englishFeesBillLine || ""}
+                onChange={onTemplateChange("englishFeesBillLine")}
+                placeholder={`${template.schoolName} FeesBill`}
+              />
+            </Field>
+            <Field label="Dari bill footer note (print)">
+              <textarea
+                className="input"
+                rows={3}
+                value={template.dariBillFooterNote || ""}
+                onChange={onTemplateChange("dariBillFooterNote")}
+                dir="rtl"
+              />
             </Field>
             <Field label="School Logo">
               <input className="input" type="file" accept="image/*" onChange={onLogoChange} />
@@ -434,7 +688,7 @@ export default function Reports() {
 
           {templateStatus ? <div className="form-error" style={{ color: "#065f46" }}>{templateStatus}</div> : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
