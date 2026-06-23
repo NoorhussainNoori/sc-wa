@@ -142,6 +142,7 @@ export default function Reports() {
     try {
       const params = new URLSearchParams({
         q: studentSearch,
+        include_inactive: "1",
         page: String(page),
         page_size: String(studentSearchPageSize),
       });

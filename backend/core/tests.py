@@ -82,6 +82,24 @@ class TestCoreSmokeTests(APITestCase):
         self.assertGreaterEqual(len(res.data["results"]), 1)
         self.assertEqual(str(res.data["results"][0]["bill_number"]), self.payment.bill_number)
 
+    def test_student_active_filter(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+        inactive_student = Student.objects.create(
+            school_class=self.school_class,
+            name="Inactive Ali",
+            registration_number="REG-1999",
+            father_name="Reza",
+            grandfather_name="Hassan",
+            phone="700000009",
+            is_active=False,
+        )
+
+        res = self.client.get("/api/students/?q=Ali&is_active=1")
+        self.assertEqual(res.status_code, 200)
+        returned_ids = {item["id"] for item in res.data["results"]}
+        self.assertIn(self.student.id, returned_ids)
+        self.assertNotIn(inactive_student.id, returned_ids)
+
     def test_payment_create_treats_json_date_as_shamsi(self):
         """DRF DateField parses YYYY-MM-DD as Gregorian; Shamsi years must use Jalali parsing."""
         self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
@@ -253,6 +271,17 @@ class TestCoreSmokeTests(APITestCase):
             phone="700000002",
             monthly_fee_override=Decimal("0"),
             transport_fee_override=Decimal("0"),
+            created_at=timezone.make_aware(jdatetime.datetime(1404, 1, 1, 10, 0, 0).togregorian()),
+        )
+        Student.objects.create(
+            school_class=self.school_class,
+            name="LeftSchool",
+            registration_number="REG-LEFT",
+            father_name="X",
+            grandfather_name="Y",
+            phone="700000003",
+            is_active=False,
+            deactivated_at=timezone.make_aware(jdatetime.datetime(1404, 1, 5, 10, 0, 0).togregorian()),
         )
 
         self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
@@ -274,6 +303,48 @@ class TestCoreSmokeTests(APITestCase):
         empty_row = next(r for r in res.data["classes"] if r["class_name"] == "Z Empty")
         self.assertEqual(empty_row["student_count"], 0)
         self.assertEqual(empty_row["free_students_count"], 0)
+
+    def test_monthly_dues_report_excludes_inactive_students(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+        inactive_student = Student.objects.create(
+            school_class=self.school_class,
+            name="LeftSchool",
+            registration_number="REG-LEFT2",
+            father_name="X",
+            grandfather_name="Y",
+            phone="700000004",
+            is_active=False,
+            deactivated_at=timezone.make_aware(jdatetime.datetime(1404, 1, 5, 10, 0, 0).togregorian()),
+        )
+
+        res = self.client.get("/api/reports/monthly-dues/?month_shamsi=1404-01")
+        self.assertEqual(res.status_code, 200)
+        returned_ids = {row["student_id"] for row in res.data["results"]}
+        self.assertIn(self.student.id, returned_ids)
+        self.assertNotIn(inactive_student.id, returned_ids)
+
+    def test_monthly_dues_report_keeps_arrears_before_deactivation_month(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+        inactive_student = Student.objects.create(
+            school_class=self.school_class,
+            name="Transferred Student",
+            registration_number="REG-LEFT3",
+            father_name="A",
+            grandfather_name="B",
+            phone="700000005",
+            created_at=timezone.make_aware(jdatetime.datetime(1404, 1, 1, 10, 0, 0).togregorian()),
+            is_active=False,
+            deactivated_at=timezone.make_aware(jdatetime.datetime(1404, 4, 10, 10, 0, 0).togregorian()),
+        )
+
+        res = self.client.get("/api/reports/monthly-dues/?month_shamsi=1404-05")
+        self.assertEqual(res.status_code, 200)
+        row = next(item for item in res.data["results"] if item["student_id"] == inactive_student.id)
+        self.assertEqual(row["due_monthly_fee_previous"], "3000.00")
+        self.assertEqual(row["due_monthly_fee_current"], "0")
+        self.assertEqual(row["due_transport_fee_previous"], "600.00")
+        self.assertEqual(row["due_transport_fee_current"], "0")
+        self.assertEqual(row["due_amount"], "3600.00")
 
     def test_student_statement_report(self):
         self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")

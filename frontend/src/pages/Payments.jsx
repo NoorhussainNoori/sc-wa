@@ -70,6 +70,7 @@ export default function Payments() {
     try {
       const params = new URLSearchParams({
         q: search,
+        is_active: "1",
         page: String(page),
         page_size: String(PAGE_SIZE),
       });

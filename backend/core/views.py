@@ -48,6 +48,14 @@ class StudentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         q = self.request.query_params.get("q")
+        include_inactive = self.request.query_params.get("include_inactive")
+        is_active = self.request.query_params.get("is_active")
+
+        if include_inactive not in {"1", "true", "True"}:
+            if is_active in {"1", "true", "True"}:
+                qs = qs.filter(is_active=True)
+            elif is_active in {"0", "false", "False"}:
+                qs = qs.filter(is_active=False)
         if q:
             qs = qs.filter(
                 Q(name__icontains=q)
@@ -463,10 +471,11 @@ class MonthlyDueFeesView(APIView):
         results = []
         for student in students_qs:
             start_month_shamsi = max(_student_enrolled_month_shamsi(student), dues_from_month_shamsi)
-            if start_month_shamsi > target_month:
+            end_month_shamsi = _student_reporting_end_month_shamsi(student, target_month)
+            if start_month_shamsi > end_month_shamsi:
                 student_months_in_range = []
             else:
-                student_months_in_range = _iter_shamsi_months(start_month_shamsi, target_month)
+                student_months_in_range = _iter_shamsi_months(start_month_shamsi, end_month_shamsi)
 
             expected_monthly = (
                 student.monthly_fee_override
@@ -607,7 +616,10 @@ class ClassMonthlyFeesReportView(APIView):
 
         rows = []
         for cls in SchoolClass.objects.all().order_by("year_shamsi", "name"):
-            students = list(Student.objects.filter(school_class=cls))
+            students = [
+                s for s in Student.objects.filter(school_class=cls)
+                if _student_is_billable_for_month(s, month_shamsi)
+            ]
             n = len(students)
             if n == 0:
                 rows.append(
@@ -881,8 +893,12 @@ class StudentStatementReportView(APIView):
             enrolled_month_shamsi,
             f"{student.school_class.year_shamsi}-01",
         )
+        end_month_shamsi = _student_reporting_end_month_shamsi(student, month_shamsi)
         try:
-            months_in_scope = _iter_shamsi_months(start_month_shamsi, month_shamsi)
+            if start_month_shamsi > end_month_shamsi:
+                months_in_scope = []
+            else:
+                months_in_scope = _iter_shamsi_months(start_month_shamsi, end_month_shamsi)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1180,6 +1196,38 @@ def _student_enrolled_date_shamsi(student: Student) -> str:
 def _student_enrolled_month_shamsi(student: Student) -> str:
     enrolled = jdatetime.datetime.fromgregorian(datetime=timezone.localtime(student.created_at))
     return f"{enrolled.year:04d}-{enrolled.month:02d}"
+
+
+def _student_deactivated_month_shamsi(student: Student) -> str | None:
+    if not student.deactivated_at:
+        return None
+    deactivated = jdatetime.datetime.fromgregorian(datetime=timezone.localtime(student.deactivated_at))
+    return f"{deactivated.year:04d}-{deactivated.month:02d}"
+
+
+def _previous_shamsi_month(month_shamsi: str) -> str:
+    year, month = _parse_shamsi_month(month_shamsi)
+    month -= 1
+    if month < 1:
+        year -= 1
+        month = 12
+    return f"{year:04d}-{month:02d}"
+
+
+def _student_reporting_end_month_shamsi(student: Student, requested_month_shamsi: str) -> str:
+    end_month_shamsi = requested_month_shamsi
+    deactivated_month_shamsi = _student_deactivated_month_shamsi(student)
+    if not student.is_active and deactivated_month_shamsi:
+        cutoff_month_shamsi = _previous_shamsi_month(deactivated_month_shamsi)
+        if cutoff_month_shamsi < end_month_shamsi:
+            end_month_shamsi = cutoff_month_shamsi
+    return end_month_shamsi
+
+
+def _student_is_billable_for_month(student: Student, month_shamsi: str) -> bool:
+    start_month_shamsi = _student_enrolled_month_shamsi(student)
+    end_month_shamsi = _student_reporting_end_month_shamsi(student, month_shamsi)
+    return start_month_shamsi <= month_shamsi <= end_month_shamsi
 
 
 def _iter_shamsi_months(start_month: str, end_month: str) -> list[str]:

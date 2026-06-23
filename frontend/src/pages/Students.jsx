@@ -27,6 +27,7 @@ export default function Students() {
     next: null,
     previous: null,
   });
+  const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(emptyStudent);
   const [editingStudentId, setEditingStudentId] = useState(null);
@@ -39,11 +40,18 @@ export default function Students() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
 
-  const loadStudents = async (query = "", page = 1) => {
+  const loadStudents = async (query = "", page = 1, nextStatusFilter = statusFilter) => {
     setLoadingStudents(true);
     try {
       const params = new URLSearchParams();
       if (query) params.set("q", query);
+      if (nextStatusFilter === "all") {
+        params.set("include_inactive", "1");
+      } else if (nextStatusFilter === "active") {
+        params.set("is_active", "1");
+      } else if (nextStatusFilter === "inactive") {
+        params.set("is_active", "0");
+      }
       params.set("page", String(page));
       params.set("page_size", String(PAGE_SIZE));
       const data = await apiFetch(`/students/?${params.toString()}`);
@@ -68,7 +76,7 @@ export default function Students() {
 
   useEffect(() => {
     const run = async () => {
-      await Promise.all([loadStudents(), loadClasses()]);
+      await Promise.all([loadStudents("", 1, "all"), loadClasses()]);
     };
     void run();
   }, []);
@@ -92,7 +100,7 @@ export default function Students() {
       });
       setForm(emptyStudent);
       setEditingStudentId(null);
-      await loadStudents(search, studentsPage);
+      await loadStudents(search, studentsPage, statusFilter);
     } catch (err) {
       setError(err.message || `Failed to ${editingStudentId ? "update" : "create"} student.`);
     } finally {
@@ -117,18 +125,22 @@ export default function Students() {
     });
   };
 
-  const onDeleteStudent = async (student) => {
-    if (!window.confirm(`Delete student "${student.name}"?`)) return;
+  const onToggleStudentActive = async (student) => {
+    const nextActive = !student.is_active;
+    if (!window.confirm(`${nextActive ? "Activate" : "Deactivate"} student "${student.name}"?`)) return;
     setError("");
     try {
-      await apiFetch(`/students/${student.id}/`, { method: "DELETE" });
+      await apiFetch(`/students/${student.id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_active: nextActive }),
+      });
       if (editingStudentId === student.id) {
         setEditingStudentId(null);
         setForm(emptyStudent);
       }
-      await loadStudents(search, studentsPage);
+      await loadStudents(search, studentsPage, statusFilter);
     } catch (err) {
-      setError(err.message || "Failed to delete student.");
+      setError(err.message || `Failed to ${nextActive ? "activate" : "deactivate"} student.`);
     }
   };
 
@@ -198,7 +210,12 @@ export default function Students() {
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search by name, registration number, father, grandfather, phone..."
           />
-          <button className="button button-outline" onClick={() => loadStudents(search, 1)} disabled={loadingStudents}>
+          <select className="input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="all">All students</option>
+            <option value="active">Active only</option>
+            <option value="inactive">Inactive only</option>
+          </select>
+          <button className="button button-outline" onClick={() => loadStudents(search, 1, statusFilter)} disabled={loadingStudents}>
             {loadingStudents ? "Searching..." : "Search"}
           </button>
         </div>
@@ -398,6 +415,7 @@ export default function Students() {
             <div>Grandfather</div>
             <div>Phone</div>
             <div>Class</div>
+            <div>Status</div>
             <div>Previous Balance</div>
             <div>Actions</div>
           </div>
@@ -414,13 +432,14 @@ export default function Students() {
                 <div>
                   {classEntry ? `${classEntry.name} (${classEntry.year_shamsi})` : "—"}
                 </div>
+                <div>{student.is_active ? "Active" : "Inactive"}</div>
                 <div>{student.previous_balance || "0.00"}</div>
                 <div className="inline-actions">
                   <button className="button button-outline" type="button" onClick={() => onEditStudent(student)}>
                     Edit
                   </button>
-                  <button className="button button-outline" type="button" onClick={() => onDeleteStudent(student)}>
-                    Delete
+                  <button className="button button-outline" type="button" onClick={() => onToggleStudentActive(student)}>
+                    {student.is_active ? "Deactivate" : "Activate"}
                   </button>
                 </div>
               </div>
@@ -438,8 +457,8 @@ export default function Students() {
           pageSize={PAGE_SIZE}
           hasPrevious={Boolean(studentsMeta.previous)}
           hasNext={Boolean(studentsMeta.next)}
-          onPrevious={() => loadStudents(search, Math.max(1, studentsPage - 1))}
-          onNext={() => loadStudents(search, studentsPage + 1)}
+          onPrevious={() => loadStudents(search, Math.max(1, studentsPage - 1), statusFilter)}
+          onNext={() => loadStudents(search, studentsPage + 1, statusFilter)}
         />
       </div>
     </div>

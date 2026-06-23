@@ -60,6 +60,8 @@ class Student(models.Model):
         validators=[MinValueValidator(Decimal("0"))],
         default=Decimal("0"),
     )
+    is_active = models.BooleanField(default=True)
+    deactivated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:

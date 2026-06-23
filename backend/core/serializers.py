@@ -15,6 +15,19 @@ from .models import (
 
 
 class StudentSerializer(serializers.ModelSerializer):
+    def create(self, validated_data):
+        if validated_data.get("is_active") is False and not validated_data.get("deactivated_at"):
+            validated_data["deactivated_at"] = timezone.now()
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        next_is_active = validated_data.get("is_active", instance.is_active)
+        if instance.is_active and not next_is_active:
+            validated_data["deactivated_at"] = timezone.now()
+        elif not instance.is_active and next_is_active:
+            validated_data["deactivated_at"] = None
+        return super().update(instance, validated_data)
+
     class Meta:
         model = Student
         fields = "__all__"
