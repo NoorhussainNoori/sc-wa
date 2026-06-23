@@ -54,6 +54,12 @@ class Student(models.Model):
         null=True,
         blank=True,
     )
+    previous_balance = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0"))],
+        default=Decimal("0"),
+    )
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
@@ -103,6 +109,34 @@ class Teacher(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} - {self.department}"
+
+
+class TeacherSalaryPayment(models.Model):
+    teacher = models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name="salary_payments")
+    amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0"))])
+    date_shamsi = jmodels.jDateField()
+    month_shamsi = models.CharField(max_length=7, blank=True)
+    notes = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-date_shamsi", "-id"]
+        indexes = [
+            models.Index(fields=["teacher"]),
+            models.Index(fields=["month_shamsi"]),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.date_shamsi:
+            self.month_shamsi = f"{self.date_shamsi.year:04d}-{self.date_shamsi.month:02d}"
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        if self.date_shamsi and self.date_shamsi.month > 9:
+            raise ValidationError({"date_shamsi": "Teacher salary payments are only allowed up to Shamsi month 09."})
+
+    def __str__(self) -> str:
+        return f"{self.teacher} - {self.amount}"
 
 
 class FeeType(models.Model):

@@ -14,6 +14,7 @@ const emptyStudent = {
   transport_fee_override: "",
   uniform_fee_override: "",
   book_fee_override: "",
+  previous_balance: "",
 };
 
 export default function Students() {
@@ -86,6 +87,7 @@ export default function Students() {
         body: JSON.stringify({
           ...form,
           school_class: form.school_class || null,
+          previous_balance: form.previous_balance || "0",
         }),
       });
       setForm(emptyStudent);
@@ -111,6 +113,7 @@ export default function Students() {
       transport_fee_override: student.transport_fee_override || "",
       uniform_fee_override: student.uniform_fee_override || "",
       book_fee_override: student.book_fee_override || "",
+      previous_balance: student.previous_balance || "",
     });
   };
 
@@ -360,6 +363,14 @@ export default function Students() {
                             placeholder="Leave blank to use class fee"
                           />
                         </Field>
+                        <Field label="Previous Year Balance">
+                          <input
+                            className="input"
+                            value={form.previous_balance}
+                            onChange={onChange("previous_balance")}
+                            placeholder="Old unpaid balance"
+                          />
+                        </Field>
                       </div>
                     </>
                   );
@@ -387,6 +398,7 @@ export default function Students() {
             <div>Grandfather</div>
             <div>Phone</div>
             <div>Class</div>
+            <div>Previous Balance</div>
             <div>Actions</div>
           </div>
           {students.map((student) => {
@@ -402,6 +414,7 @@ export default function Students() {
                 <div>
                   {classEntry ? `${classEntry.name} (${classEntry.year_shamsi})` : "—"}
                 </div>
+                <div>{student.previous_balance || "0.00"}</div>
                 <div className="inline-actions">
                   <button className="button button-outline" type="button" onClick={() => onEditStudent(student)}>
                     Edit

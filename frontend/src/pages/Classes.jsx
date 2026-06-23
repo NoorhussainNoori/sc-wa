@@ -225,6 +225,7 @@ export default function Classes() {
       const dueMonthlyCurr = d.due_monthly_fee_current ?? "";
       const dueTransportPrev = d.due_transport_fee_previous ?? "";
       const dueTransportCurr = d.due_transport_fee_current ?? "";
+      const duePreviousBalance = d.due_previous_balance ?? "";
       const burjMonthlyPrevCount =
         d.due_monthly_previous_months_count != null
           ? String(d.due_monthly_previous_months_count)
@@ -262,6 +263,12 @@ export default function Classes() {
                 <td class="bill-td" colspan="2">${escapeHtml(d.father_name)}</td>
                 <th scope="row" class="bill-th">Class/صنف</th>
                 <td class="bill-td">${escapeHtml(classLabel)}</td>
+              </tr>
+              <tr>
+                <td class="bill-td bill-col-note"></td>
+                <td class="bill-td bill-amt" colspan="2">${escapeHtml(duePreviousBalance)}</td>
+                <td class="bill-td bill-col-burj"></td>
+                <td class="bill-td bill-col-subject" colspan="4">Previous year balance</td>
               </tr>
             </tbody>
           </table>
@@ -317,19 +324,23 @@ export default function Classes() {
     });
 
     const chunked = [];
-    for (let i = 0; i < receipts.length; i += 2) {
-      chunked.push(receipts.slice(i, i + 2));
+    for (let i = 0; i < receipts.length; i += 3) {
+      chunked.push(receipts.slice(i, i + 3));
     }
 
     const pagesHtml = chunked
-      .map((pair) => {
-        const top = pair[0] || `<div class="receipt-half empty"></div>`;
-        const bottom = pair[1] || `<div class="receipt-half empty"></div>`;
+      .map((group) => {
+        const first = group[0] || `<div class="receipt-half empty"></div>`;
+        const second = group[1] || `<div class="receipt-half empty"></div>`;
+        const third = group[2] || `<div class="receipt-half empty"></div>`;
         return `
           <section class="a4-page">
             <div class="page-halves">
-              ${top}
-              ${bottom}
+              ${first}
+              <div class="cut-line"><span>Cut Here</span></div>
+              ${second}
+              <div class="cut-line"><span>Cut Here</span></div>
+              ${third}
             </div>
           </section>
         `;
@@ -342,7 +353,7 @@ export default function Classes() {
           <meta charset="utf-8" />
           <title>${escapeHtml(title)}</title>
           <style>
-            @page { size: A4; margin: 10mm; }
+            @page { size: A4; margin: 7mm; }
             body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #0f172a; }
             .btn { padding: 10px 12px; border-radius: 10px; border: 1px solid #cbd5f5; background:#fff; cursor:pointer; font-weight:600; }
             .a4-page { page-break-after: always; }
@@ -350,55 +361,73 @@ export default function Classes() {
               width: 100%;
               display: flex;
               flex-direction: column;
-              gap: 10mm;
+              gap: 5mm;
+            }
+            .cut-line {
+              position: relative;
+              height: 0;
+              border-top: 1px dashed #64748b;
+              margin: 1mm 0;
+            }
+            .cut-line span {
+              position: absolute;
+              top: -7px;
+              left: 50%;
+              transform: translateX(-50%);
+              background: #fff;
+              padding: 0 8px;
+              font-size: 8px;
+              letter-spacing: 0.08em;
+              text-transform: uppercase;
+              color: #64748b;
             }
             .receipt-half {
               border: 1px solid #e2e8f0;
               border-radius: 12px;
-              padding: 12px 14px;
+              padding: 8px 10px;
               box-sizing: border-box;
-              min-height: 122mm;
+              min-height: 0;
               display: flex;
               flex-direction: column;
-              line-height: 1.2;
+              line-height: 1.1;
             }
             .receipt-half.empty { border-style: dashed; background: #f8fafc; }
-            .fees-bill-wrap { line-height: 1.35; }
+            .fees-bill-wrap { line-height: 1.2; }
             .bill-header-main {
               display: flex;
               align-items: flex-start;
-              gap: 12px;
-              margin-bottom: 10px;
+              gap: 10px;
+              margin-bottom: 6px;
             }
             .bill-logo-wrap { flex: 0 0 auto; }
-            .bill-logo-img { width: 56px; height: 56px; border-radius: 12px; object-fit: contain; display: block; }
-            .bill-logo-fallback { width: 56px; height: 56px; display: block; }
-            .bill-logo-fallback svg { width: 56px; height: 56px; display: block; }
+            .bill-logo-img { width: 42px; height: 42px; border-radius: 10px; object-fit: contain; display: block; }
+            .bill-logo-fallback { width: 42px; height: 42px; display: block; }
+            .bill-logo-fallback svg { width: 42px; height: 42px; display: block; }
             .bill-header-text { flex: 1; min-width: 0; }
-            .bill-title-dari { font-size: 15px; font-weight: 800; margin: 0; text-align: right; direction: rtl; }
-            .bill-title-en { font-size: 13px; font-weight: 600; margin: 4px 0 0; text-align: right; }
+            .bill-title-dari { font-size: 13px; font-weight: 800; margin: 0; text-align: right; direction: rtl; }
+            .bill-title-en { font-size: 11px; font-weight: 600; margin: 2px 0 0; text-align: right; }
             .bill-header-meta {
-              margin-top: 4px;
+              margin-top: 2px;
               display: flex;
               flex-direction: column;
-              gap: 2px;
-              font-size: 11px;
+              gap: 1px;
+              font-size: 9px;
               color: #475569;
               text-align: right;
             }
-            .bill-period { font-size: 11px; color: #475569; margin-top: 6px; text-align: right; }
+            .bill-period { font-size: 9px; color: #475569; margin-top: 3px; text-align: right; }
             .bill-period-label { font-weight: 600; }
-            .bill-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 6px; }
-            .bill-table th, .bill-table td { border: 1px solid #1e293b; padding: 6px 8px; vertical-align: middle; }
+            .bill-table { width: 100%; border-collapse: collapse; font-size: 9px; margin-top: 4px; }
+            .bill-table th, .bill-table td { border: 1px solid #1e293b; padding: 4px 5px; vertical-align: middle; }
             .bill-th { background: #f1f5f9; font-weight: 600; }
             .bill-amt { text-align: center; font-weight: 600; }
             .bill-col-subject { direction: rtl; text-align: right; }
             .bill-col-burj { text-align: center; min-width: 3.5rem; }
-            .bill-td-grand { font-size: 14px; font-weight: 800; }
-            .bill-td-paydate { min-height: 2rem; vertical-align: top; }
+            .bill-td-grand { font-size: 12px; font-weight: 800; }
+            .bill-td-paydate { min-height: 1.2rem; vertical-align: top; }
             .bill-td-jumlah { text-align: center; white-space: nowrap; }
-            .bill-footer-dari { margin-top: 10px; font-size: 10px; line-height: 1.45; text-align: justify; direction: rtl; }
-            .bill-footer-en { margin-top: 6px; font-size: 10px; color: #64748b; text-align: center; }
+            .bill-footer-dari { margin-top: 6px; font-size: 8px; line-height: 1.25; text-align: justify; direction: rtl; }
+            .bill-footer-en { margin-top: 4px; font-size: 8px; color: #64748b; text-align: center; }
             @media print { .receipt-half { border-radius: 10px; } .print-tools { display:none !important; } }
           </style>
         </head>
@@ -746,6 +775,10 @@ export default function Classes() {
                 <div className="due-card-row">
                   <span className="due-card-label">Due transport</span>
                   <span>{d.due_transport_fee}</span>
+                </div>
+                <div className="due-card-row">
+                  <span className="due-card-label">Previous balance</span>
+                  <span>{d.due_previous_balance || "0.00"}</span>
                 </div>
                 <div className="due-card-row due-card-total">
                   <span className="due-card-label">Total due</span>

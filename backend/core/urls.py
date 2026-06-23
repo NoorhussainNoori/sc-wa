@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     StudentViewSet,
     TeacherViewSet,
+    TeacherSalaryPaymentViewSet,
     SchoolClassViewSet,
     FeeTypeViewSet,
     PaymentViewSet,
@@ -12,6 +13,8 @@ from .views import (
     ReportSummaryView,
     MonthlyDueFeesView,
     ClassMonthlyFeesReportView,
+    TeacherStatementReportView,
+    StudentStatementReportView,
     BackupExportView,
     BackupRestoreView,
 )
@@ -19,6 +22,7 @@ from .views import (
 router = DefaultRouter()
 router.register(r"students", StudentViewSet)
 router.register(r"teachers", TeacherViewSet)
+router.register(r"teacher-salary-payments", TeacherSalaryPaymentViewSet)
 router.register(r"classes", SchoolClassViewSet)
 router.register(r"fee-types", FeeTypeViewSet)
 router.register(r"payments", PaymentViewSet)
@@ -33,6 +37,16 @@ urlpatterns = [
         "reports/class-monthly-fees/",
         ClassMonthlyFeesReportView.as_view(),
         name="report-class-monthly-fees",
+    ),
+    path(
+        "reports/teacher-statement/",
+        TeacherStatementReportView.as_view(),
+        name="report-teacher-statement",
+    ),
+    path(
+        "reports/student-statement/",
+        StudentStatementReportView.as_view(),
+        name="report-student-statement",
     ),
     path("backup/export/", BackupExportView.as_view(), name="backup-export"),
     path("backup/restore/", BackupRestoreView.as_view(), name="backup-restore"),

@@ -5,6 +5,7 @@ from rest_framework import serializers
 from .models import (
     Student,
     Teacher,
+    TeacherSalaryPayment,
     SchoolClass,
     FeeType,
     Payment,
@@ -29,6 +30,31 @@ class TeacherSerializer(serializers.ModelSerializer):
     class Meta:
         model = Teacher
         fields = "__all__"
+
+
+class TeacherSalaryPaymentSerializer(serializers.ModelSerializer):
+    date_shamsi = JDateField()
+    teacher_name = serializers.SerializerMethodField()
+    teacher_department = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TeacherSalaryPayment
+        fields = "__all__"
+        read_only_fields = ["month_shamsi"]
+
+    def get_teacher_name(self, obj):
+        return getattr(obj.teacher, "name", "") if obj.teacher_id else ""
+
+    def get_teacher_department(self, obj):
+        return getattr(obj.teacher, "department", "") if obj.teacher_id else ""
+
+    def validate(self, attrs):
+        date_shamsi = attrs.get("date_shamsi")
+        if date_shamsi and date_shamsi.month > 9:
+            raise serializers.ValidationError(
+                {"date_shamsi": "Teacher salary payments are only allowed up to Shamsi month 09."}
+            )
+        return attrs
 
 
 class FeeTypeSerializer(serializers.ModelSerializer):

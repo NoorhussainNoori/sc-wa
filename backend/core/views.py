@@ -22,6 +22,7 @@ from .backup_fixture import build_dumpdata_backup_json, repair_backup_fixture_sh
 from .models import (
     Student,
     Teacher,
+    TeacherSalaryPayment,
     SchoolClass,
     FeeType,
     Payment,
@@ -31,6 +32,7 @@ from .models import (
 from .serializers import (
     StudentSerializer,
     TeacherSerializer,
+    TeacherSalaryPaymentSerializer,
     SchoolClassSerializer,
     FeeTypeSerializer,
     PaymentSerializer,
@@ -180,8 +182,9 @@ class StudentViewSet(viewsets.ModelViewSet):
             "transport_fee_override",
             "uniform_fee_override",
             "book_fee_override",
+            "previous_balance",
         ]
-        sample = "1,,1404,Ali,REG-001,Reza,Hassan,700000001,1200,0,0,0"
+        sample = "1,,1404,Ali,REG-001,Reza,Hassan,700000001,1200,0,0,0,3500"
         content = ",".join(headers) + "\n" + sample + "\n"
         response = HttpResponse(content, content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="students_import_template.csv"'
@@ -191,6 +194,44 @@ class StudentViewSet(viewsets.ModelViewSet):
 class TeacherViewSet(viewsets.ModelViewSet):
     queryset = Teacher.objects.all().order_by("-id")
     serializer_class = TeacherSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        q = self.request.query_params.get("q")
+        if q:
+            qs = qs.filter(
+                Q(name__icontains=q)
+                | Q(father_name__icontains=q)
+                | Q(phone__icontains=q)
+                | Q(email__icontains=q)
+                | Q(department__icontains=q)
+            )
+        return qs
+
+
+class TeacherSalaryPaymentViewSet(viewsets.ModelViewSet):
+    queryset = TeacherSalaryPayment.objects.select_related("teacher").all().order_by("-date_shamsi", "-id")
+    serializer_class = TeacherSalaryPaymentSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        teacher_id = self.request.query_params.get("teacher_id")
+        month = self.request.query_params.get("month")
+        start = self.request.query_params.get("start")
+        end = self.request.query_params.get("end")
+
+        if teacher_id:
+            qs = qs.filter(teacher_id=teacher_id)
+        if month:
+            qs = qs.filter(month_shamsi=month)
+        if start and end:
+            try:
+                start_date = _parse_shamsi_date(start)
+                end_date = _parse_shamsi_date(end)
+            except ValueError:
+                return qs.none()
+            qs = qs.filter(date_shamsi__gte=start_date, date_shamsi__lte=end_date)
+        return qs
 
 
 class SchoolClassViewSet(viewsets.ModelViewSet):
@@ -372,6 +413,7 @@ class MonthlyDueFeesView(APIView):
             )
 
         transport_fee_types = FeeType.objects.filter(name__icontains="transport")
+        previous_balance_fee_types = _previous_balance_fee_types()
 
         students_qs = Student.objects.select_related("school_class").filter(school_class__isnull=False)
         if class_id:
@@ -405,8 +447,27 @@ class MonthlyDueFeesView(APIView):
             ):
                 transport_paid_by_student_month[(row["student_id"], row["month_shamsi"])] = row["paid"]
 
+        previous_balance_paid_by_student = {}
+        if student_ids and previous_balance_fee_types.exists():
+            for row in (
+                Payment.objects.filter(
+                    student_id__in=student_ids,
+                    month_shamsi__in=months_in_range,
+                    fee_type__in=previous_balance_fee_types,
+                )
+                .values("student_id")
+                .annotate(paid=Sum("amount"))
+            ):
+                previous_balance_paid_by_student[row["student_id"]] = row["paid"] or Decimal("0")
+
         results = []
         for student in students_qs:
+            start_month_shamsi = max(_student_enrolled_month_shamsi(student), dues_from_month_shamsi)
+            if start_month_shamsi > target_month:
+                student_months_in_range = []
+            else:
+                student_months_in_range = _iter_shamsi_months(start_month_shamsi, target_month)
+
             expected_monthly = (
                 student.monthly_fee_override
                 if student.monthly_fee_override is not None
@@ -431,7 +492,7 @@ class MonthlyDueFeesView(APIView):
             transport_previous_unpaid_months = 0
 
             sid = student.id
-            for m in months_in_range:
+            for m in student_months_in_range:
                 paid_m = monthly_paid_by_student_month.get((sid, m)) or Decimal("0")
                 paid_monthly_total += paid_m
                 short_m = max(expected_monthly - paid_m, Decimal("0"))
@@ -454,7 +515,9 @@ class MonthlyDueFeesView(APIView):
 
             due_monthly_total = due_monthly_previous + due_monthly_current
             due_transport_total = due_transport_previous + due_transport_current
-            total_due = due_monthly_total + due_transport_total
+            previous_balance_paid = previous_balance_paid_by_student.get(student.id) or Decimal("0")
+            previous_balance_due = max(student.previous_balance - previous_balance_paid, Decimal("0"))
+            total_due = due_monthly_total + due_transport_total + previous_balance_due
 
             if total_due > 0:
                 results.append(
@@ -482,6 +545,9 @@ class MonthlyDueFeesView(APIView):
                         "due_transport_fee_current": str(due_transport_current),
                         "due_transport_previous_months_count": transport_previous_unpaid_months,
                         "due_transport_fee": str(due_transport_total),
+                        "previous_balance": _money_str(student.previous_balance),
+                        "paid_previous_balance": _money_str(previous_balance_paid),
+                        "due_previous_balance": _money_str(previous_balance_due),
                         "due_amount": str(total_due),
                     }
                 )
@@ -630,6 +696,284 @@ class ClassMonthlyFeesReportView(APIView):
         return Response({"month_shamsi": month_shamsi, "classes": rows})
 
 
+class TeacherStatementReportView(APIView):
+    """
+    Printable per-teacher salary statement.
+    """
+
+    def get(self, request):
+        teacher_id = request.query_params.get("teacher_id")
+        if not teacher_id:
+            return Response({"detail": "teacher_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        requested_month_shamsi = request.query_params.get("month_shamsi") or _current_shamsi_month()
+        try:
+            month_shamsi = _cap_teacher_salary_month(requested_month_shamsi)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            teacher = Teacher.objects.get(pk=teacher_id)
+        except Teacher.DoesNotExist:
+            return Response({"detail": "Teacher not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        start_month_shamsi = _teacher_started_month_shamsi(teacher)
+        start_year, start_month = _parse_shamsi_month(start_month_shamsi)
+        end_year, end_month = _parse_shamsi_month(month_shamsi)
+        if (start_year, start_month) > (end_year, end_month):
+            months_in_scope = []
+        else:
+            try:
+                months_in_scope = _iter_shamsi_months(start_month_shamsi, month_shamsi)
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        payment_qs = TeacherSalaryPayment.objects.filter(
+            teacher_id=teacher.id,
+            month_shamsi__in=months_in_scope,
+        ).order_by("date_shamsi", "id")
+        payments = list(payment_qs)
+
+        paid_by_month = {
+            row["month_shamsi"]: row["paid"]
+            for row in payment_qs.values("month_shamsi").annotate(paid=Sum("amount")).order_by("month_shamsi")
+        }
+
+        month_rows = []
+        total_should_pay = Decimal("0")
+        total_paid = Decimal("0")
+        total_balance = Decimal("0")
+        for month in months_in_scope:
+            expected = teacher.salary
+            paid = paid_by_month.get(month) or Decimal("0")
+            due = max(expected - paid, Decimal("0"))
+            month_rows.append(
+                {
+                    "month_shamsi": month,
+                    "expected_salary": _money_str(expected),
+                    "paid_salary": _money_str(paid),
+                    "due_salary": _money_str(due),
+                }
+            )
+            total_should_pay += expected
+            total_paid += paid
+            total_balance += due
+
+        return Response(
+            {
+                "teacher": {
+                    "id": teacher.id,
+                    "name": teacher.name,
+                    "father_name": teacher.father_name,
+                    "phone": teacher.phone,
+                    "email": teacher.email,
+                    "address": teacher.address,
+                    "department": teacher.department,
+                    "salary": _money_str(teacher.salary),
+                    "created_date_shamsi": _teacher_created_date_shamsi(teacher),
+                    "start_month_shamsi": start_month_shamsi,
+                },
+                "through_month_shamsi": month_shamsi,
+                "requested_month_shamsi": requested_month_shamsi,
+                "months_count": len(months_in_scope),
+                "months": month_rows,
+                "salary_payments": TeacherSalaryPaymentSerializer(payments, many=True).data,
+                "summary": {
+                    "total_expected": _money_str(total_should_pay),
+                    "total_paid": _money_str(total_paid),
+                    "total_balance": _money_str(total_balance),
+                    "total_due": _money_str(total_balance),
+                },
+            }
+        )
+
+
+class StudentStatementReportView(APIView):
+    """
+    Printable per-student statement with recurring fees, one-time items, and all payments.
+    """
+
+    def get(self, request):
+        student_id = request.query_params.get("student_id")
+        if not student_id:
+            return Response(
+                {"detail": "student_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        month_shamsi = request.query_params.get("month_shamsi") or _current_shamsi_month()
+        try:
+            _parse_shamsi_month(month_shamsi)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            student = Student.objects.select_related("school_class").get(pk=student_id)
+        except Student.DoesNotExist:
+            return Response({"detail": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if student.school_class is None:
+            return Response(
+                {"detail": "Student is not assigned to a class."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        enrolled_month_shamsi = _student_enrolled_month_shamsi(student)
+        start_month_shamsi = max(
+            enrolled_month_shamsi,
+            f"{student.school_class.year_shamsi}-01",
+        )
+        try:
+            months_in_scope = _iter_shamsi_months(start_month_shamsi, month_shamsi)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        monthly_fee_types = FeeType.objects.filter(name__icontains="monthly")
+        transport_fee_types = FeeType.objects.filter(name__icontains="transport")
+        uniform_fee_types = FeeType.objects.filter(name__icontains="uniform")
+        book_fee_types = FeeType.objects.filter(name__icontains="book")
+        previous_balance_fee_types = _previous_balance_fee_types()
+
+        payment_qs = Payment.objects.select_related("student", "fee_type", "school_class").filter(
+            student_id=student.id,
+            month_shamsi__in=months_in_scope,
+        )
+        payments = list(payment_qs.order_by("date_shamsi", "id"))
+        payment_serializer = PaymentSerializer(payments, many=True)
+
+        monthly_paid_map = _payment_totals_by_month(payment_qs, monthly_fee_types)
+        transport_paid_map = _payment_totals_by_month(payment_qs, transport_fee_types)
+
+        recurring_monthly_fee = _student_fee_value(student.monthly_fee_override, student.school_class.monthly_fee)
+        recurring_transport_fee = _student_fee_value(student.transport_fee_override, student.school_class.transport_fee)
+        one_time_uniform_fee = _student_fee_value(student.uniform_fee_override, student.school_class.uniform_fee)
+        one_time_book_fee = _student_fee_value(student.book_fee_override, student.school_class.book_fee)
+
+        month_rows = []
+        total_monthly_expected = Decimal("0")
+        total_monthly_paid = Decimal("0")
+        total_monthly_due = Decimal("0")
+        total_transport_expected = Decimal("0")
+        total_transport_paid = Decimal("0")
+        total_transport_due = Decimal("0")
+
+        for month in months_in_scope:
+            paid_monthly = monthly_paid_map.get(month) or Decimal("0")
+            paid_transport = transport_paid_map.get(month) or Decimal("0")
+            due_monthly = max(recurring_monthly_fee - paid_monthly, Decimal("0"))
+            due_transport = max(recurring_transport_fee - paid_transport, Decimal("0"))
+            month_rows.append(
+                {
+                    "month_shamsi": month,
+                    "expected_monthly_fee": _money_str(recurring_monthly_fee),
+                    "paid_monthly_fee": _money_str(paid_monthly),
+                    "due_monthly_fee": _money_str(due_monthly),
+                    "expected_transport_fee": _money_str(recurring_transport_fee),
+                    "paid_transport_fee": _money_str(paid_transport),
+                    "due_transport_fee": _money_str(due_transport),
+                    "total_due": _money_str(due_monthly + due_transport),
+                }
+            )
+            total_monthly_expected += recurring_monthly_fee
+            total_monthly_paid += paid_monthly
+            total_monthly_due += due_monthly
+            total_transport_expected += recurring_transport_fee
+            total_transport_paid += paid_transport
+            total_transport_due += due_transport
+
+        fee_totals = [
+            {
+                "fee_type_name": row["fee_type__name"],
+                "total_paid": _money_str(row["paid"]),
+            }
+            for row in (
+                payment_qs.values("fee_type__name")
+                .annotate(paid=Sum("amount"))
+                .order_by("fee_type__name")
+            )
+        ]
+
+        uniform_paid_total = _payment_total_for_types(payment_qs, uniform_fee_types)
+        book_paid_total = _payment_total_for_types(payment_qs, book_fee_types)
+        previous_balance_paid_total = _payment_total_for_types(payment_qs, previous_balance_fee_types)
+        other_paid_total = sum(
+            Decimal(str(row["paid"] or Decimal("0")))
+            for row in fee_totals
+            if not _is_statement_fee_type_name(row["fee_type_name"])
+        )
+
+        uniform_due = max(one_time_uniform_fee - uniform_paid_total, Decimal("0"))
+        book_due = max(one_time_book_fee - book_paid_total, Decimal("0"))
+        previous_balance_due = max(student.previous_balance - previous_balance_paid_total, Decimal("0"))
+        recurring_due = total_monthly_due + total_transport_due
+        one_time_due = uniform_due + book_due + previous_balance_due
+        total_paid = (
+            total_monthly_paid
+            + total_transport_paid
+            + uniform_paid_total
+            + book_paid_total
+            + previous_balance_paid_total
+            + other_paid_total
+        )
+        total_expected = (
+            total_monthly_expected
+            + total_transport_expected
+            + one_time_uniform_fee
+            + one_time_book_fee
+            + student.previous_balance
+        )
+        total_balance = total_expected - total_paid
+
+        return Response(
+            {
+                "student": {
+                    "id": student.id,
+                    "name": student.name,
+                    "registration_number": student.registration_number,
+                    "father_name": student.father_name,
+                    "grandfather_name": student.grandfather_name,
+                    "phone": student.phone,
+                    "class_id": student.school_class_id,
+                    "class_name": student.school_class.name,
+                    "class_year_shamsi": student.school_class.year_shamsi,
+                    "enrolled_date_shamsi": _student_enrolled_date_shamsi(student),
+                    "enrolled_month_shamsi": enrolled_month_shamsi,
+                    "previous_balance": _money_str(student.previous_balance),
+                },
+                "through_month_shamsi": month_shamsi,
+                "start_month_shamsi": start_month_shamsi,
+                "months_count": len(months_in_scope),
+                "months": month_rows,
+                "payments": payment_serializer.data,
+                "fee_totals": fee_totals,
+                "summary": {
+                    "total_expected": _money_str(total_expected),
+                    "monthly_expected": _money_str(total_monthly_expected),
+                    "monthly_paid": _money_str(total_monthly_paid),
+                    "monthly_due": _money_str(total_monthly_due),
+                    "transport_expected": _money_str(total_transport_expected),
+                    "transport_paid": _money_str(total_transport_paid),
+                    "transport_due": _money_str(total_transport_due),
+                    "uniform_expected": _money_str(one_time_uniform_fee),
+                    "uniform_paid": _money_str(uniform_paid_total),
+                    "uniform_due": _money_str(uniform_due),
+                    "book_expected": _money_str(one_time_book_fee),
+                    "book_paid": _money_str(book_paid_total),
+                    "book_due": _money_str(book_due),
+                    "previous_balance_expected": _money_str(student.previous_balance),
+                    "previous_balance_paid": _money_str(previous_balance_paid_total),
+                    "previous_balance_due": _money_str(previous_balance_due),
+                    "other_paid": _money_str(other_paid_total),
+                    "recurring_due": _money_str(recurring_due),
+                    "one_time_due": _money_str(one_time_due),
+                    "total_paid": _money_str(total_paid),
+                    "total_due": _money_str(total_balance),
+                    "total_balance": _money_str(total_balance),
+                },
+            }
+        )
+
+
 _BACKUP_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
@@ -748,6 +1092,94 @@ def _parse_shamsi_year(value: str) -> int:
         raise ValueError("Invalid year format. Use YYYY.") from exc
 
 
+def _current_shamsi_month() -> str:
+    today = jdatetime.date.today()
+    return f"{today.year:04d}-{today.month:02d}"
+
+
+def _teacher_started_month_shamsi(teacher: Teacher) -> str:
+    created = jdatetime.datetime.fromgregorian(datetime=timezone.localtime(teacher.created_at))
+    return f"{created.year:04d}-{created.month:02d}"
+
+
+def _teacher_created_date_shamsi(teacher: Teacher) -> str:
+    created = jdatetime.datetime.fromgregorian(datetime=timezone.localtime(teacher.created_at))
+    return f"{created.year:04d}-{created.month:02d}-{created.day:02d}"
+
+
+def _cap_teacher_salary_month(month_shamsi: str) -> str:
+    year, month = _parse_shamsi_month(month_shamsi)
+    if month > 9:
+        month = 9
+    return f"{year:04d}-{month:02d}"
+
+
+def _student_enrolled_date_shamsi(student: Student) -> str:
+    enrolled = jdatetime.datetime.fromgregorian(datetime=timezone.localtime(student.created_at))
+    return f"{enrolled.year:04d}-{enrolled.month:02d}-{enrolled.day:02d}"
+
+
+def _student_enrolled_month_shamsi(student: Student) -> str:
+    enrolled = jdatetime.datetime.fromgregorian(datetime=timezone.localtime(student.created_at))
+    return f"{enrolled.year:04d}-{enrolled.month:02d}"
+
+
+def _iter_shamsi_months(start_month: str, end_month: str) -> list[str]:
+    start_year, start_num = _parse_shamsi_month(start_month)
+    end_year, end_num = _parse_shamsi_month(end_month)
+    if (start_year, start_num) > (end_year, end_num):
+        raise ValueError("Start month cannot be after the end month.")
+
+    months = []
+    year, month = start_year, start_num
+    while (year, month) <= (end_year, end_num):
+        months.append(f"{year:04d}-{month:02d}")
+        month += 1
+        if month > 12:
+            year += 1
+            month = 1
+    return months
+
+
+def _student_fee_value(override, class_value):
+    return override if override is not None else class_value
+
+
+def _money_str(value) -> str:
+    amount = Decimal("0") if value in (None, "") else Decimal(str(value))
+    return str(amount.quantize(Decimal("0.00")))
+
+
+def _payment_totals_by_month(payment_qs, fee_types):
+    rows = {}
+    if not fee_types.exists():
+        return rows
+    for row in (
+        payment_qs.filter(fee_type__in=fee_types)
+        .values("month_shamsi")
+        .annotate(paid=Sum("amount"))
+        .order_by("month_shamsi")
+    ):
+        rows[row["month_shamsi"]] = row["paid"] or Decimal("0")
+    return rows
+
+
+def _payment_total_for_types(payment_qs, fee_types):
+    if not fee_types.exists():
+        return Decimal("0")
+    total = payment_qs.filter(fee_type__in=fee_types).aggregate(paid=Sum("amount")).get("paid")
+    return total or Decimal("0")
+
+
+def _is_statement_fee_type_name(name: str) -> bool:
+    lowered = (name or "").lower()
+    return any(key in lowered for key in ("monthly", "transport", "uniform", "book", "previous balance"))
+
+
+def _previous_balance_fee_types():
+    return FeeType.objects.filter(name__iexact="Previous Balance")
+
+
 def _normalize_headers(headers):
     return [str(h or "").strip().lower() for h in headers]
 
@@ -856,6 +1288,9 @@ def _build_student_from_row(row, row_number, classes_by_id, classes_by_name_year
     book_fee_override = _parse_optional_decimal(
         row.get("book_fee_override"), "book_fee_override", row_number, errors
     )
+    previous_balance = _parse_optional_decimal(
+        row.get("previous_balance"), "previous_balance", row_number, errors
+    )
 
     if errors:
         return None, errors
@@ -871,5 +1306,6 @@ def _build_student_from_row(row, row_number, classes_by_id, classes_by_name_year
         transport_fee_override=transport_fee_override,
         uniform_fee_override=uniform_fee_override,
         book_fee_override=book_fee_override,
+        previous_balance=previous_balance or Decimal("0"),
     )
     return student, []

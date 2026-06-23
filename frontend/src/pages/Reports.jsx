@@ -1,6 +1,7 @@
-import { useState } from "react";
-import { apiFetch } from "../api.js";
+﻿import { useState } from "react";
+import { apiFetch, extractListData, extractPaginationMeta } from "../api.js";
 import Field from "../components/Field.jsx";
+import PaginationControls from "../components/PaginationControls.jsx";
 import StatCard from "../components/StatCard.jsx";
 
 const defaultFilters = {
@@ -11,6 +12,9 @@ const defaultFilters = {
   includeItems: true,
 };
 
+const studentSearchPageSize = 8;
+const teacherSearchPageSize = 8;
+
 export default function Reports() {
   const RECEIPT_TEMPLATE_KEY = "receipt_template_config_v1";
   const defaultTemplate = {
@@ -19,10 +23,10 @@ export default function Reports() {
     schoolPhone: "0700 000 000",
     thankYouMessage: "Thank you for your attention and timely payment.",
     logoDataUrl: "",
-    dariBillTitle: "لیسه خصوصی وطن آکسفور\u0689 فیس بل",
+    dariBillTitle: "Ù„ÛŒØ³Ù‡ Ø®ØµÙˆØµÛŒ ÙˆØ·Ù† Ø¢Ú©Ø³ÙÙˆØ±\u0689 ÙÛŒØ³ Ø¨Ù„",
     englishFeesBillLine: "Watan Oxford High School FeesBill",
     dariBillFooterNote:
-      "یاداشت: والدین گرامی در تحویلی فیس فرزندان تان کوشش نماید تا در وقت معین فیس مذکور را تادیه نموده تا همکار با آداره لیسه در زمینه معاشات استادان باشید.",
+      "ÛŒØ§Ø¯Ø§Ø´Øª: ÙˆØ§Ù„Ø¯ÛŒÙ† Ú¯Ø±Ø§Ù…ÛŒ Ø¯Ø± ØªØ­ÙˆÛŒÙ„ÛŒ ÙÛŒØ³ ÙØ±Ø²Ù†Ø¯Ø§Ù† ØªØ§Ù† Ú©ÙˆØ´Ø´ Ù†Ù…Ø§ÛŒØ¯ ØªØ§ Ø¯Ø± ÙˆÙ‚Øª Ù…Ø¹ÛŒÙ† ÙÛŒØ³ Ù…Ø°Ú©ÙˆØ± Ø±Ø§ ØªØ§Ø¯ÛŒÙ‡ Ù†Ù…ÙˆØ¯Ù‡ ØªØ§ Ù‡Ù…Ú©Ø§Ø± Ø¨Ø§ Ø¢Ø¯Ø§Ø±Ù‡ Ù„ÛŒØ³Ù‡ Ø¯Ø± Ø²Ù…ÛŒÙ†Ù‡ Ù…Ø¹Ø§Ø´Ø§Øª Ø§Ø³ØªØ§Ø¯Ø§Ù† Ø¨Ø§Ø´ÛŒØ¯.",
   };
   const [filters, setFilters] = useState(defaultFilters);
   const [summary, setSummary] = useState(null);
@@ -33,6 +37,34 @@ export default function Reports() {
   const [classMonthReport, setClassMonthReport] = useState(null);
   const [classMonthError, setClassMonthError] = useState("");
   const [loadingClassMonth, setLoadingClassMonth] = useState(false);
+  const [studentSearch, setStudentSearch] = useState("");
+  const [students, setStudents] = useState([]);
+  const [studentsPage, setStudentsPage] = useState(1);
+  const [studentsMeta, setStudentsMeta] = useState({
+    count: 0,
+    next: null,
+    previous: null,
+  });
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [studentStatementMonth, setStudentStatementMonth] = useState("");
+  const [studentStatement, setStudentStatement] = useState(null);
+  const [studentStatementError, setStudentStatementError] = useState("");
+  const [loadingStudentSearch, setLoadingStudentSearch] = useState(false);
+  const [loadingStudentStatement, setLoadingStudentStatement] = useState(false);
+  const [teacherSearch, setTeacherSearch] = useState("");
+  const [teachers, setTeachers] = useState([]);
+  const [teachersPage, setTeachersPage] = useState(1);
+  const [teachersMeta, setTeachersMeta] = useState({
+    count: 0,
+    next: null,
+    previous: null,
+  });
+  const [selectedTeacher, setSelectedTeacher] = useState(null);
+  const [teacherStatementMonth, setTeacherStatementMonth] = useState("");
+  const [teacherStatement, setTeacherStatement] = useState(null);
+  const [teacherStatementError, setTeacherStatementError] = useState("");
+  const [loadingTeacherSearch, setLoadingTeacherSearch] = useState(false);
+  const [loadingTeacherStatement, setLoadingTeacherStatement] = useState(false);
 
   const classFeesGridStyle = {
     gridTemplateColumns: "minmax(150px, 1.3fr) 72px repeat(7, minmax(86px, 1fr)) 64px",
@@ -95,6 +127,96 @@ export default function Reports() {
     } finally {
       setLoadingClassMonth(false);
     }
+  };
+
+  const searchStudents = async (page = 1) => {
+    setStudentStatementError("");
+    setLoadingStudentSearch(true);
+    try {
+      const params = new URLSearchParams({
+        q: studentSearch,
+        page: String(page),
+        page_size: String(studentSearchPageSize),
+      });
+      const data = await apiFetch(`/students/?${params.toString()}`);
+      setStudents(extractListData(data));
+      setStudentsMeta(extractPaginationMeta(data));
+      setStudentsPage(page);
+    } catch (err) {
+      setStudentStatementError(err.message || "Failed to search students.");
+    } finally {
+      setLoadingStudentSearch(false);
+    }
+  };
+
+  const loadStudentStatement = async () => {
+    if (!selectedStudent?.id) {
+      setStudentStatementError("Select a student first.");
+      return;
+    }
+    setStudentStatementError("");
+    setLoadingStudentStatement(true);
+    try {
+      const params = new URLSearchParams({
+        student_id: String(selectedStudent.id),
+      });
+      const month = String(studentStatementMonth || "").trim();
+      if (month) params.set("month_shamsi", month);
+      const data = await apiFetch(`/reports/student-statement/?${params.toString()}`);
+      setStudentStatement(data);
+    } catch (err) {
+      setStudentStatementError(err.message || "Failed to load student statement.");
+      setStudentStatement(null);
+    } finally {
+      setLoadingStudentStatement(false);
+    }
+  };
+
+  const searchTeachers = async (page = 1) => {
+    setTeacherStatementError("");
+    setLoadingTeacherSearch(true);
+    try {
+      const params = new URLSearchParams({
+        q: teacherSearch,
+        page: String(page),
+        page_size: String(teacherSearchPageSize),
+      });
+      const data = await apiFetch(`/teachers/?${params.toString()}`);
+      setTeachers(extractListData(data));
+      setTeachersMeta(extractPaginationMeta(data));
+      setTeachersPage(page);
+    } catch (err) {
+      setTeacherStatementError(err.message || "Failed to search teachers.");
+    } finally {
+      setLoadingTeacherSearch(false);
+    }
+  };
+
+  const loadTeacherStatement = async () => {
+    if (!selectedTeacher?.id) {
+      setTeacherStatementError("Select a teacher first.");
+      return;
+    }
+    setTeacherStatementError("");
+    setLoadingTeacherStatement(true);
+    try {
+      const params = new URLSearchParams({
+        teacher_id: String(selectedTeacher.id),
+      });
+      const month = String(teacherStatementMonth || "").trim();
+      if (month) params.set("month_shamsi", month);
+      const data = await apiFetch(`/reports/teacher-statement/?${params.toString()}`);
+      setTeacherStatement(data);
+    } catch (err) {
+      setTeacherStatementError(err.message || "Failed to load teacher statement.");
+      setTeacherStatement(null);
+    } finally {
+      setLoadingTeacherStatement(false);
+    }
+  };
+
+  const onSelectTeacher = (teacher) => {
+    setSelectedTeacher(teacher);
   };
 
   const exportClassMonthCsv = () => {
@@ -193,14 +315,14 @@ export default function Reports() {
         </head>
         <body>
           <h1>${String(template.schoolName || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</h1>
-          <div class="muted">Class monthly fees — Shamsi month ${classMonthReport.month_shamsi}</div>
+          <div class="muted">Class monthly fees â€” Shamsi month ${classMonthReport.month_shamsi}</div>
           <table>
             <thead>${headerRow}</thead>
             <tbody>${bodyRows}</tbody>
           </table>
           <p class="note">
             Free students: students with 0 monthly and 0 transport fee (class defaults or overrides).
-            Remaining is per student max(expected − paid, 0), summed for the class for this month only.
+            Remaining is per student max(expected âˆ’ paid, 0), summed for the class for this month only.
           </p>
         </body>
       </html>
@@ -210,6 +332,469 @@ export default function Reports() {
     reportWindow.focus();
     reportWindow.print();
   };
+
+  const exportStudentStatementCsv = () => {
+    if (!studentStatement) return;
+    const lines = [];
+    const student = studentStatement.student || {};
+    const summary = studentStatement.summary || {};
+    lines.push(`Student,${csvSafe(student.name)}`);
+    lines.push(`Registration Number,${csvSafe(student.registration_number)}`);
+    lines.push(`Class,${csvSafe(`${student.class_name || ""} (${student.class_year_shamsi || ""})`)}`);
+    lines.push(`Enrolled,${csvSafe(student.enrolled_date_shamsi)}`);
+    lines.push(`Through Month,${csvSafe(studentStatement.through_month_shamsi)}`);
+    lines.push("");
+    lines.push("Grand Summary");
+    lines.push("Metric,Value");
+    lines.push(`Total Should Pay,${csvSafe(summary.total_expected)}`);
+    lines.push(`Total Paid,${csvSafe(summary.total_paid)}`);
+    lines.push(`Balance,${csvSafe(summary.total_balance || summary.total_due)}`);
+    lines.push("");
+    lines.push("Fee Summary");
+    lines.push("Metric,Value");
+    lines.push(`Monthly Expected,${csvSafe(summary.monthly_expected)}`);
+    lines.push(`Monthly Paid,${csvSafe(summary.monthly_paid)}`);
+    lines.push(`Monthly Due,${csvSafe(summary.monthly_due)}`);
+    lines.push(`Transport Expected,${csvSafe(summary.transport_expected)}`);
+    lines.push(`Transport Paid,${csvSafe(summary.transport_paid)}`);
+    lines.push(`Transport Due,${csvSafe(summary.transport_due)}`);
+    lines.push(`Uniform Expected,${csvSafe(summary.uniform_expected)}`);
+    lines.push(`Uniform Paid,${csvSafe(summary.uniform_paid)}`);
+    lines.push(`Uniform Due,${csvSafe(summary.uniform_due)}`);
+    lines.push(`Book Expected,${csvSafe(summary.book_expected)}`);
+    lines.push(`Book Paid,${csvSafe(summary.book_paid)}`);
+    lines.push(`Book Due,${csvSafe(summary.book_due)}`);
+    lines.push(`Previous Balance Expected,${csvSafe(summary.previous_balance_expected)}`);
+    lines.push(`Previous Balance Paid,${csvSafe(summary.previous_balance_paid)}`);
+    lines.push(`Previous Balance Due,${csvSafe(summary.previous_balance_due)}`);
+    lines.push(`Other Paid,${csvSafe(summary.other_paid)}`);
+    lines.push(`Total Paid,${csvSafe(summary.total_paid)}`);
+    lines.push(`Total Due,${csvSafe(summary.total_balance || summary.total_due)}`);
+    lines.push("");
+    lines.push("Monthly Breakdown");
+    lines.push("Month,Expected Monthly,Paid Monthly,Due Monthly,Expected Transport,Paid Transport,Due Transport,Total Due");
+    (studentStatement.months || []).forEach((row) => {
+      lines.push(
+        [
+          csvSafe(row.month_shamsi),
+          csvSafe(row.expected_monthly_fee),
+          csvSafe(row.paid_monthly_fee),
+          csvSafe(row.due_monthly_fee),
+          csvSafe(row.expected_transport_fee),
+          csvSafe(row.paid_transport_fee),
+          csvSafe(row.due_transport_fee),
+          csvSafe(row.total_due),
+        ].join(",")
+      );
+    });
+    lines.push("");
+    lines.push("Payments");
+    lines.push("ID,Bill,Fee Type,Amount,Date,Reason,Notes");
+    (studentStatement.payments || []).forEach((item) => {
+      lines.push(
+        [
+          item.id,
+          csvSafe(item.bill_number),
+          csvSafe(item.fee_type_name || item.fee_type),
+          csvSafe(item.amount),
+          csvSafe(item.date_shamsi),
+          csvSafe(item.other_reason || ""),
+          csvSafe(item.notes || ""),
+        ].join(",")
+      );
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `student_statement_${student.registration_number || student.id}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const printStudentStatement = () => {
+    if (!studentStatement) return;
+    const reportWindow = window.open("", "_blank", "width=1100,height=900");
+    if (!reportWindow) return;
+    const student = studentStatement.student || {};
+    const summary = studentStatement.summary || {};
+    const totalShouldPay = summary.total_expected || "0.00";
+    const totalPaid = summary.total_paid || "0.00";
+    const totalBalance = summary.total_balance || summary.total_due || "0.00";
+    const monthRows = (studentStatement.months || [])
+      .map(
+        (row) => `
+          <tr>
+            <td>${escapeHtml(row.month_shamsi)}</td>
+            <td>${escapeHtml(row.expected_monthly_fee)}</td>
+            <td>${escapeHtml(row.paid_monthly_fee)}</td>
+            <td>${escapeHtml(row.due_monthly_fee)}</td>
+            <td>${escapeHtml(row.expected_transport_fee)}</td>
+            <td>${escapeHtml(row.paid_transport_fee)}</td>
+            <td>${escapeHtml(row.due_transport_fee)}</td>
+            <td>${escapeHtml(row.total_due)}</td>
+          </tr>
+        `
+      )
+      .join("");
+    const paymentRows = (studentStatement.payments || [])
+      .map(
+        (item) => `
+          <tr>
+            <td>${escapeHtml(item.bill_number)}</td>
+            <td>${escapeHtml(item.fee_type_name || item.fee_type || "")}</td>
+            <td style="text-align:right">${escapeHtml(item.amount)}</td>
+            <td>${escapeHtml(item.date_shamsi)}</td>
+            <td>${escapeHtml(item.other_reason || "")}</td>
+            <td>${escapeHtml(item.notes || "")}</td>
+          </tr>
+        `
+      )
+      .join("");
+
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Student Statement</title>
+          <style>
+            body { font-family: "Segoe UI", Arial, sans-serif; color: #0f172a; padding: 24px; }
+            h1 { margin: 0; font-size: 1.4rem; }
+            .muted { color: #64748b; font-size: 0.9rem; }
+            .head { display:flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 16px; }
+            .card-grid { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
+            .card { border:1px solid #e2e8f0; border-radius: 10px; padding: 10px; }
+            .card .label { color:#64748b; font-size: 0.8rem; }
+            .card strong { display:block; margin-top: 4px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+            th, td { border:1px solid #e2e8f0; padding: 8px; vertical-align: top; }
+            th { background:#f8fafc; text-align:left; }
+            .section { margin-top: 20px; }
+            .note { margin-top: 8px; color: #64748b; font-size: 11px; }
+            .summary { display:grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0 18px; }
+            .summary-card { border:1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; }
+            .summary-card .label { color:#64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+            .summary-card .value { font-size: 16px; font-weight: 700; margin-top: 4px; }
+            .info-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+            .info-item { border:1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; }
+            .info-item .label { color:#64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+            .info-item .value { font-weight: 600; margin-top: 4px; }
+            .signature { display:flex; justify-content: space-between; gap: 16px; margin-top: 44px; }
+            .sig-box { width: 32%; border-top: 1px solid #0f172a; padding-top: 8px; min-height: 44px; font-size: 12px; }
+            @media print { .no-print { display:none !important; } }
+          </style>
+        </head>
+        <body>
+          <div class="head">
+            <div>
+              <h1>Student Statement</h1>
+              <div class="muted">${escapeHtml(student.name || "")} | ${escapeHtml(student.registration_number || "")}</div>
+              <div class="muted">${escapeHtml(student.class_name || "")} (${escapeHtml(student.class_year_shamsi || "")})</div>
+            </div>
+            <div style="text-align:right">
+              <div class="muted">Enrollment: ${escapeHtml(student.enrolled_date_shamsi || "")}</div>
+              <div class="muted">Through: ${escapeHtml(studentStatement.through_month_shamsi || "")}</div>
+              <div class="muted">Generated: ${escapeHtml(new Date().toLocaleString())}</div>
+            </div>
+          </div>
+
+          <div class="summary">
+            <div class="summary-card"><div class="label">Total Should Pay</div><div class="value">${escapeHtml(totalShouldPay)}</div></div>
+            <div class="summary-card"><div class="label">Total Paid</div><div class="value">${escapeHtml(totalPaid)}</div></div>
+            <div class="summary-card"><div class="label">Balance</div><div class="value">${escapeHtml(totalBalance)}</div></div>
+            <div class="summary-card"><div class="label">Statement Through</div><div class="value">${escapeHtml(studentStatement.through_month_shamsi || "")}</div></div>
+          </div>
+
+          <div class="section">
+            <h3>Student Information</h3>
+            <div class="info-grid">
+              <div class="info-item"><div class="label">Student</div><div class="value">${escapeHtml(student.name || "")}</div></div>
+              <div class="info-item"><div class="label">Registration No</div><div class="value">${escapeHtml(student.registration_number || "")}</div></div>
+              <div class="info-item"><div class="label">Father Name</div><div class="value">${escapeHtml(student.father_name || "")}</div></div>
+              <div class="info-item"><div class="label">Class</div><div class="value">${escapeHtml(student.class_name || "")} (${escapeHtml(student.class_year_shamsi || "")})</div></div>
+            </div>
+            <div class="note">This statement combines recurring monthly charges with one-time item charges and recorded payments.</div>
+          </div>
+
+          <div class="section">
+            <h3>Fee Summary</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th>Expected</th>
+                  <th>Paid</th>
+                  <th>Due</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>Monthly</td><td>${escapeHtml(summary.monthly_expected || "0.00")}</td><td>${escapeHtml(summary.monthly_paid || "0.00")}</td><td>${escapeHtml(summary.monthly_due || "0.00")}</td></tr>
+                <tr><td>Transport</td><td>${escapeHtml(summary.transport_expected || "0.00")}</td><td>${escapeHtml(summary.transport_paid || "0.00")}</td><td>${escapeHtml(summary.transport_due || "0.00")}</td></tr>
+                <tr><td>Uniform</td><td>${escapeHtml(summary.uniform_expected || "0.00")}</td><td>${escapeHtml(summary.uniform_paid || "0.00")}</td><td>${escapeHtml(summary.uniform_due || "0.00")}</td></tr>
+                <tr><td>Book</td><td>${escapeHtml(summary.book_expected || "0.00")}</td><td>${escapeHtml(summary.book_paid || "0.00")}</td><td>${escapeHtml(summary.book_due || "0.00")}</td></tr>
+                <tr><td>Previous Balance</td><td>${escapeHtml(summary.previous_balance_expected || "0.00")}</td><td>${escapeHtml(summary.previous_balance_paid || "0.00")}</td><td>${escapeHtml(summary.previous_balance_due || "0.00")}</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="section">
+            <h3>Monthly Breakdown</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th>Expected Monthly</th>
+                  <th>Paid Monthly</th>
+                  <th>Due Monthly</th>
+                  <th>Expected Transport</th>
+                  <th>Paid Transport</th>
+                  <th>Due Transport</th>
+                  <th>Total Due</th>
+                </tr>
+              </thead>
+              <tbody>${monthRows || '<tr><td colspan="8">No recurring fee rows.</td></tr>'}</tbody>
+            </table>
+          </div>
+
+          <div class="section">
+            <h3>Payment Ledger</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Bill</th>
+                  <th>Fee Type</th>
+                  <th>Amount</th>
+                  <th>Date</th>
+                  <th>Reason</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>${paymentRows || '<tr><td colspan="6">No payments found.</td></tr>'}</tbody>
+            </table>
+          </div>
+
+          <div class="signature">
+            <div class="sig-box">Student / Guardian Signature</div>
+            <div class="sig-box">Received By</div>
+            <div class="sig-box">Authorized Signature and Stamp</div>
+          </div>
+        </body>
+      </html>
+    `;
+    reportWindow.document.write(html);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
+  };
+
+  const exportTeacherStatementCsv = () => {
+    if (!teacherStatement) return;
+    const lines = [];
+    const teacher = teacherStatement.teacher || {};
+    const summary = teacherStatement.summary || {};
+    lines.push(`Teacher,${csvSafe(teacher.name)}`);
+    lines.push(`Department,${csvSafe(teacher.department)}`);
+    lines.push(`Salary,${csvSafe(teacher.salary)}`);
+    lines.push(`Through Month,${csvSafe(teacherStatement.through_month_shamsi)}`);
+    lines.push("");
+    lines.push("Grand Summary");
+    lines.push("Metric,Value");
+    lines.push(`Total Should Pay,${csvSafe(summary.total_expected)}`);
+    lines.push(`Total Paid,${csvSafe(summary.total_paid)}`);
+    lines.push(`Balance,${csvSafe(summary.total_balance || summary.total_due)}`);
+    lines.push("");
+    lines.push("Monthly Breakdown");
+    lines.push("Month,Expected Salary,Paid Salary,Due Salary");
+    (teacherStatement.months || []).forEach((row) => {
+      lines.push(
+        [
+          csvSafe(row.month_shamsi),
+          csvSafe(row.expected_salary),
+          csvSafe(row.paid_salary),
+          csvSafe(row.due_salary),
+        ].join(",")
+      );
+    });
+    lines.push("");
+    lines.push("Salary Payments");
+    lines.push("ID,Date,Amount,Notes");
+    (teacherStatement.salary_payments || []).forEach((item) => {
+      lines.push(
+        [
+          item.id,
+          csvSafe(item.date_shamsi),
+          csvSafe(item.amount),
+          csvSafe(item.notes || ""),
+        ].join(",")
+      );
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `teacher_statement_${teacher.name || teacher.id}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const printTeacherStatement = () => {
+    if (!teacherStatement) return;
+    const reportWindow = window.open("", "_blank", "width=1100,height=900");
+    if (!reportWindow) return;
+    const teacher = teacherStatement.teacher || {};
+    const summary = teacherStatement.summary || {};
+    const totalShouldPay = summary.total_expected || "0.00";
+    const totalPaid = summary.total_paid || "0.00";
+    const totalBalance = summary.total_balance || summary.total_due || "0.00";
+    const monthRows = (teacherStatement.months || [])
+      .map(
+        (row) => `
+          <tr>
+            <td>${escapeHtml(row.month_shamsi)}</td>
+            <td>${escapeHtml(row.expected_salary)}</td>
+            <td>${escapeHtml(row.paid_salary)}</td>
+            <td>${escapeHtml(row.due_salary)}</td>
+          </tr>
+        `
+      )
+      .join("");
+    const paymentRows = (teacherStatement.salary_payments || [])
+      .map(
+        (item) => `
+          <tr>
+            <td>${escapeHtml(item.date_shamsi)}</td>
+            <td>${escapeHtml(item.amount)}</td>
+            <td>${escapeHtml(item.notes || "")}</td>
+          </tr>
+        `
+      )
+      .join("");
+
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Teacher Statement</title>
+          <style>
+            body { font-family: "Segoe UI", Arial, sans-serif; color: #0f172a; padding: 24px; }
+            h1 { margin: 0; font-size: 1.4rem; }
+            .muted { color: #64748b; font-size: 0.9rem; }
+            .head { display:flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 16px; }
+            .summary { display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0 18px; }
+            .summary-card { border:1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; }
+            .summary-card .label { color:#64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+            .summary-card .value { font-size: 16px; font-weight: 700; margin-top: 4px; }
+            .info-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+            .info-item { border:1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; }
+            .info-item .label { color:#64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+            .info-item .value { font-weight: 600; margin-top: 4px; }
+            .section { margin-top: 20px; }
+            .note { margin-top: 8px; color: #64748b; font-size: 11px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+            th, td { border:1px solid #e2e8f0; padding: 8px; vertical-align: top; }
+            th { background:#f8fafc; text-align:left; }
+            .signature { display:flex; justify-content: space-between; gap: 16px; margin-top: 44px; }
+            .sig-box { width: 32%; border-top: 1px solid #0f172a; padding-top: 8px; min-height: 44px; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="head">
+            <div>
+              <h1>Teacher Salary Statement</h1>
+              <div class="muted">${escapeHtml(teacher.name || "")} | ${escapeHtml(teacher.department || "")}</div>
+              <div class="muted">Salary: ${escapeHtml(teacher.salary || "")}</div>
+            </div>
+            <div style="text-align:right">
+              <div class="muted">Created: ${escapeHtml(teacher.created_date_shamsi || "")}</div>
+              <div class="muted">Through: ${escapeHtml(teacherStatement.through_month_shamsi || "")}</div>
+            </div>
+          </div>
+
+          <div class="summary">
+            <div class="summary-card"><div class="label">Total Should Pay</div><div class="value">${escapeHtml(totalShouldPay)}</div></div>
+            <div class="summary-card"><div class="label">Total Paid</div><div class="value">${escapeHtml(totalPaid)}</div></div>
+            <div class="summary-card"><div class="label">Balance</div><div class="value">${escapeHtml(totalBalance)}</div></div>
+          </div>
+
+          <div class="section">
+            <h3>Teacher Information</h3>
+            <div class="info-grid">
+              <div class="info-item"><div class="label">Teacher</div><div class="value">${escapeHtml(teacher.name || "")}</div></div>
+              <div class="info-item"><div class="label">Department</div><div class="value">${escapeHtml(teacher.department || "")}</div></div>
+              <div class="info-item"><div class="label">Phone</div><div class="value">${escapeHtml(teacher.phone || "")}</div></div>
+              <div class="info-item"><div class="label">Salary</div><div class="value">${escapeHtml(teacher.salary || "")}</div></div>
+            </div>
+            <div class="note">This statement shows the monthly salary due, recorded salary payments, and the remaining balance.</div>
+          </div>
+
+          <div class="section">
+            <h3>Monthly Breakdown</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th>Expected Salary</th>
+                  <th>Paid Salary</th>
+                  <th>Due Salary</th>
+                </tr>
+              </thead>
+              <tbody>${monthRows || '<tr><td colspan="4">No salary rows.</td></tr>'}</tbody>
+            </table>
+          </div>
+
+          <div class="section">
+            <h3>Salary Payments</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Amount</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>${paymentRows || '<tr><td colspan="3">No salary payments found.</td></tr>'}</tbody>
+            </table>
+          </div>
+
+          <div class="signature">
+            <div class="sig-box">Teacher Signature</div>
+            <div class="sig-box">Accounts / Finance</div>
+            <div class="sig-box">Authorized Signature and Stamp</div>
+          </div>
+        </body>
+      </html>
+    `;
+    reportWindow.document.write(html);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
+  };
+
+  const escapeHtml = (value) => {
+    const str = value === null || value === undefined ? "" : String(value);
+    return str.replace(/[&<>"']/g, (ch) => {
+      switch (ch) {
+        case "&":
+          return "&amp;";
+        case "<":
+          return "&lt;";
+        case ">":
+          return "&gt;";
+        case '"':
+          return "&quot;";
+        case "'":
+          return "&#039;";
+        default:
+          return ch;
+      }
+    });
+  };
+
+  const csvSafe = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
 
   const onTemplateChange = (field) => (event) => {
     setTemplate((prev) => ({ ...prev, [field]: event.target.value }));
@@ -397,7 +982,11 @@ export default function Reports() {
               ? "Revenue, expenses, and profit with flexible date ranges."
               : activeTab === "classMonth"
                 ? "Per-class tuition and transport totals for one Shamsi month."
-                : "Receipt appearance for printed bills."}
+                : activeTab === "studentStatement"
+                  ? "A printable statement for one student, with payments, fees, and balances."
+                  : activeTab === "teacherStatement"
+                    ? "A printable salary statement for one teacher, with monthly salary payouts and balance."
+                  : "Receipt appearance for printed bills."}
           </p>
         </div>
         {activeTab === "summary" ? (
@@ -407,6 +996,14 @@ export default function Reports() {
         ) : activeTab === "classMonth" ? (
           <button className="button button-primary" onClick={fetchClassMonthReport} disabled={loadingClassMonth}>
             {loadingClassMonth ? "Generating..." : "Generate Report"}
+          </button>
+        ) : activeTab === "studentStatement" ? (
+          <button className="button button-primary" onClick={loadStudentStatement} disabled={loadingStudentStatement}>
+            {loadingStudentStatement ? "Generating..." : "Generate Statement"}
+          </button>
+        ) : activeTab === "teacherStatement" ? (
+          <button className="button button-primary" onClick={loadTeacherStatement} disabled={loadingTeacherStatement}>
+            {loadingTeacherStatement ? "Generating..." : "Generate Statement"}
           </button>
         ) : (
           <button className="button button-primary" onClick={saveTemplate} disabled={savingTemplate}>
@@ -429,6 +1026,20 @@ export default function Reports() {
           onClick={() => setActiveTab("classMonth")}
         >
           Class monthly fees
+        </button>
+        <button
+          className={activeTab === "studentStatement" ? "button button-primary" : "button button-outline"}
+          type="button"
+          onClick={() => setActiveTab("studentStatement")}
+        >
+          Student statement
+        </button>
+        <button
+          className={activeTab === "teacherStatement" ? "button button-primary" : "button button-outline"}
+          type="button"
+          onClick={() => setActiveTab("teacherStatement")}
+        >
+          Teacher statement
         </button>
         <button
           className={activeTab === "template" ? "button button-primary" : "button button-outline"}
@@ -456,6 +1067,28 @@ export default function Reports() {
             Export CSV
           </button>
           <button className="button button-outline" type="button" onClick={printClassMonthReport}>
+            Print
+          </button>
+        </div>
+      ) : null}
+
+      {activeTab === "studentStatement" && studentStatement ? (
+        <div className="inline-actions">
+          <button className="button button-outline" type="button" onClick={exportStudentStatementCsv}>
+            Export CSV
+          </button>
+          <button className="button button-outline" type="button" onClick={printStudentStatement}>
+            Print
+          </button>
+        </div>
+      ) : null}
+
+      {activeTab === "teacherStatement" && teacherStatement ? (
+        <div className="inline-actions">
+          <button className="button button-outline" type="button" onClick={exportTeacherStatementCsv}>
+            Export CSV
+          </button>
+          <button className="button button-outline" type="button" onClick={printTeacherStatement}>
             Print
           </button>
         </div>
@@ -506,9 +1139,9 @@ export default function Reports() {
       </div>
 
       <div className="stats-grid">
-        <StatCard label="Total Revenue" value={summary ? summary.total_revenue : "—"} />
-        <StatCard label="Total Expenses" value={summary ? summary.total_expenses : "—"} />
-        <StatCard label="Profit" value={summary ? summary.profit : "—"} />
+        <StatCard label="Total Revenue" value={summary ? summary.total_revenue : "â€”"} />
+        <StatCard label="Total Expenses" value={summary ? summary.total_expenses : "â€”"} />
+        <StatCard label="Profit" value={summary ? summary.profit : "â€”"} />
       </div>
 
       {summary?.payments ? (
@@ -594,7 +1227,7 @@ export default function Reports() {
 
           {classMonthReport?.classes?.length ? (
             <div className="panel" style={{ overflowX: "auto" }}>
-              <h3>Results — {classMonthReport.month_shamsi}</h3>
+              <h3>Results â€” {classMonthReport.month_shamsi}</h3>
               <div className="table">
                 <div className="table-head" style={classFeesGridStyle}>
                   <div>Class</div>
@@ -622,6 +1255,448 @@ export default function Reports() {
                 ))}
               </div>
             </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {activeTab === "studentStatement" ? (
+        <>
+          <div className="panel">
+            <h3>Student search</h3>
+            <div className="inline-actions">
+              <input
+                className="input"
+                value={studentSearch}
+                onChange={(event) => setStudentSearch(event.target.value)}
+                placeholder="Name, registration number, father, grandfather, phone..."
+              />
+              <button className="button button-outline" type="button" onClick={() => searchStudents(1)} disabled={loadingStudentSearch}>
+                {loadingStudentSearch ? "Searching..." : "Search"}
+              </button>
+            </div>
+            <div className="pill-list">
+              {students.map((student) => (
+                <button
+                  key={student.id}
+                  className={`pill ${selectedStudent?.id === student.id ? "pill-active" : ""}`}
+                  onClick={() => setSelectedStudent(student)}
+                  type="button"
+                >
+                  {student.name} ({student.registration_number || "No Reg"}) - {student.father_name}
+                </button>
+              ))}
+            </div>
+            {!loadingStudentSearch && students.length === 0 ? (
+              <div className="muted-panel" style={{ marginTop: 12 }}>
+                Search for a student to build the statement.
+              </div>
+            ) : null}
+            <PaginationControls
+              count={studentsMeta.count}
+              currentPage={studentsPage}
+              pageSize={studentSearchPageSize}
+              hasPrevious={Boolean(studentsMeta.previous)}
+              hasNext={Boolean(studentsMeta.next)}
+              onPrevious={() => searchStudents(Math.max(1, studentsPage - 1))}
+              onNext={() => searchStudents(studentsPage + 1)}
+            />
+          </div>
+
+          <div className="panel">
+            <h3>Statement options</h3>
+            <p className="muted-panel" style={{ marginBottom: 12 }}>
+              Leave the month blank to use the current Shamsi month. The report includes monthly fees, transport,
+              one-time uniform/book items, and the full payment ledger.
+            </p>
+            <div className="form-grid">
+              <Field label="Selected Student">
+                <input
+                  className="input"
+                  value={
+                    selectedStudent
+                      ? `${selectedStudent.name} (${selectedStudent.registration_number || "No Reg"})`
+                      : ""
+                  }
+                  readOnly
+                  placeholder="Choose a student above"
+                />
+              </Field>
+              <Field label="Through Month (Shamsi YYYY-MM, optional)">
+                <input
+                  className="input"
+                  value={studentStatementMonth}
+                  onChange={(event) => setStudentStatementMonth(event.target.value)}
+                  placeholder="Current month if blank"
+                />
+              </Field>
+            </div>
+            {loadingStudentStatement ? <div className="status-message">Generating statement...</div> : null}
+            {studentStatementError ? <div className="form-error">{studentStatementError}</div> : null}
+            {studentStatement ? (
+              <div className="muted-panel" style={{ marginTop: 12 }}>
+                This view is the readable version. Use <strong>Print</strong> for the signable office copy.
+              </div>
+            ) : null}
+          </div>
+
+          {studentStatement ? (
+            <>
+              <div className="stats-grid">
+                <StatCard label="Total Should Pay" value={studentStatement.summary?.total_expected || "—"} />
+                <StatCard label="Total Paid" value={studentStatement.summary?.total_paid || "—"} />
+                <StatCard label="Balance" value={studentStatement.summary?.total_balance || studentStatement.summary?.total_due || "—"} />
+                <StatCard label="Statement Through" value={studentStatement.through_month_shamsi || "—"} />
+              </div>
+
+              <div className="panel">
+                <h3>Student Details</h3>
+                <p className="muted-panel" style={{ marginBottom: 12 }}>
+                  Basic student information used in the statement.
+                </p>
+                <div className="table">
+                  <div className="table-head">
+                    <div>Field</div>
+                    <div>Value</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Name</div>
+                    <div>{studentStatement.student?.name}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Registration No</div>
+                    <div>{studentStatement.student?.registration_number}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Class</div>
+                    <div>
+                      {studentStatement.student?.class_name} ({studentStatement.student?.class_year_shamsi})
+                    </div>
+                  </div>
+                  <div className="table-row">
+                    <div>Enrolled</div>
+                    <div>{studentStatement.student?.enrolled_date_shamsi}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Previous Balance</div>
+                    <div>{studentStatement.student?.previous_balance}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Through Month</div>
+                    <div>{studentStatement.through_month_shamsi}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="panel">
+                <h3>Fee Summary</h3>
+                <p className="muted-panel" style={{ marginBottom: 12 }}>
+                  Expected = charged amount. Paid = recorded payments. Due = remaining balance.
+                </p>
+                <div className="table">
+                  <div className="table-head">
+                    <div>Type</div>
+                    <div>Expected</div>
+                    <div>Paid</div>
+                    <div>Due</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Monthly</div>
+                    <div>{studentStatement.summary?.monthly_expected}</div>
+                    <div>{studentStatement.summary?.monthly_paid}</div>
+                    <div>{studentStatement.summary?.monthly_due}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Transport</div>
+                    <div>{studentStatement.summary?.transport_expected}</div>
+                    <div>{studentStatement.summary?.transport_paid}</div>
+                    <div>{studentStatement.summary?.transport_due}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Uniform</div>
+                    <div>{studentStatement.summary?.uniform_expected}</div>
+                    <div>{studentStatement.summary?.uniform_paid}</div>
+                    <div>{studentStatement.summary?.uniform_due}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Book</div>
+                    <div>{studentStatement.summary?.book_expected}</div>
+                    <div>{studentStatement.summary?.book_paid}</div>
+                    <div>{studentStatement.summary?.book_due}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Previous Balance</div>
+                    <div>{studentStatement.summary?.previous_balance_expected}</div>
+                    <div>{studentStatement.summary?.previous_balance_paid}</div>
+                    <div>{studentStatement.summary?.previous_balance_due}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Other</div>
+                    <div>â€”</div>
+                    <div>{studentStatement.summary?.other_paid}</div>
+                    <div>â€”</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="panel" style={{ overflowX: "auto" }}>
+                <h3>Monthly Breakdown</h3>
+                <p className="muted-panel" style={{ marginBottom: 12 }}>
+                  One row per month, showing recurring charges only.
+                </p>
+                <div className="table" style={{ minWidth: 980 }}>
+                  <div className="table-head">
+                    <div>Month</div>
+                    <div>Exp. Monthly</div>
+                    <div>Paid Monthly</div>
+                    <div>Due Monthly</div>
+                    <div>Exp. Transport</div>
+                    <div>Paid Transport</div>
+                    <div>Due Transport</div>
+                    <div>Total Due</div>
+                  </div>
+                  {(studentStatement.months || []).map((row) => (
+                    <div className="table-row" key={row.month_shamsi}>
+                      <div>{row.month_shamsi}</div>
+                      <div>{row.expected_monthly_fee}</div>
+                      <div>{row.paid_monthly_fee}</div>
+                      <div>{row.due_monthly_fee}</div>
+                      <div>{row.expected_transport_fee}</div>
+                      <div>{row.paid_transport_fee}</div>
+                      <div>{row.due_transport_fee}</div>
+                      <div>{row.total_due}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="panel">
+                <h3>Payment Ledger</h3>
+                <p className="muted-panel" style={{ marginBottom: 12 }}>
+                  Every payment recorded for this student in the selected range.
+                </p>
+                <div className="table">
+                  <div className="table-head">
+                    <div>Bill</div>
+                    <div>Fee Type</div>
+                    <div>Amount</div>
+                    <div>Date</div>
+                    <div>Reason</div>
+                    <div>Notes</div>
+                  </div>
+                  {(studentStatement.payments || []).map((payment) => (
+                    <div className="table-row" key={payment.id}>
+                      <div>{payment.bill_number}</div>
+                      <div>{payment.fee_type_name || payment.fee_type}</div>
+                      <div>{payment.amount}</div>
+                      <div>{payment.date_shamsi}</div>
+                      <div>{payment.other_reason || "â€”"}</div>
+                      <div>{payment.notes || "â€”"}</div>
+                    </div>
+                  ))}
+                </div>
+                {!studentStatement.payments?.length ? (
+                  <div className="muted-panel" style={{ marginTop: 12 }}>
+                    No payments found for this statement range.
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : null}
+        </>
+      ) : null}
+
+      {activeTab === "teacherStatement" ? (
+        <>
+          <div className="panel">
+            <h3>Teacher search</h3>
+            <div className="inline-actions">
+              <input
+                className="input"
+                value={teacherSearch}
+                onChange={(event) => setTeacherSearch(event.target.value)}
+                placeholder="Name, father, phone, department..."
+              />
+              <button className="button button-outline" type="button" onClick={() => searchTeachers(1)} disabled={loadingTeacherSearch}>
+                {loadingTeacherSearch ? "Searching..." : "Search"}
+              </button>
+            </div>
+            <div className="pill-list">
+              {teachers.map((teacher) => (
+                <button
+                  key={teacher.id}
+                  className={`pill ${selectedTeacher?.id === teacher.id ? "pill-active" : ""}`}
+                  onClick={() => onSelectTeacher(teacher)}
+                  type="button"
+                >
+                  {teacher.name} - {teacher.department}
+                </button>
+              ))}
+            </div>
+            {!loadingTeacherSearch && teachers.length === 0 ? (
+              <div className="muted-panel" style={{ marginTop: 12 }}>
+                Search for a teacher to build the statement.
+              </div>
+            ) : null}
+            <PaginationControls
+              count={teachersMeta.count}
+              currentPage={teachersPage}
+              pageSize={teacherSearchPageSize}
+              hasPrevious={Boolean(teachersMeta.previous)}
+              hasNext={Boolean(teachersMeta.next)}
+              onPrevious={() => searchTeachers(Math.max(1, teachersPage - 1))}
+              onNext={() => searchTeachers(teachersPage + 1)}
+            />
+          </div>
+
+          <div className="panel">
+            <h3>Statement options</h3>
+            <p className="muted-panel" style={{ marginBottom: 12 }}>
+              Leave the month blank to use the current Shamsi month. The report shows monthly salary due, salary
+              payments, and the remaining balance.
+            </p>
+            <div className="form-grid">
+              <Field label="Selected Teacher">
+                <input
+                  className="input"
+                  value={
+                    selectedTeacher
+                      ? `${selectedTeacher.name} (${selectedTeacher.department || "No Department"})`
+                      : ""
+                  }
+                  readOnly
+                  placeholder="Choose a teacher above"
+                />
+              </Field>
+              <Field label="Through Month (Shamsi YYYY-MM, optional)">
+                <input
+                  className="input"
+                  value={teacherStatementMonth}
+                  onChange={(event) => setTeacherStatementMonth(event.target.value)}
+                  placeholder="Current month if blank"
+                />
+              </Field>
+            </div>
+            {loadingTeacherStatement ? <div className="status-message">Generating statement...</div> : null}
+            {teacherStatementError ? <div className="form-error">{teacherStatementError}</div> : null}
+            {teacherStatement ? (
+              <div className="muted-panel" style={{ marginTop: 12 }}>
+                This view is the readable version. Use <strong>Print</strong> for the signable office copy.
+              </div>
+            ) : null}
+          </div>
+
+          {teacherStatement ? (
+            <>
+              <div className="stats-grid">
+                <StatCard label="Total Should Pay" value={teacherStatement.summary?.total_expected || "—"} />
+                <StatCard label="Total Paid" value={teacherStatement.summary?.total_paid || "—"} />
+                <StatCard label="Balance" value={teacherStatement.summary?.total_balance || teacherStatement.summary?.total_due || "—"} />
+                <StatCard label="Statement Through" value={teacherStatement.through_month_shamsi || "—"} />
+              </div>
+
+              <div className="panel">
+                <h3>Teacher Details</h3>
+                <p className="muted-panel" style={{ marginBottom: 12 }}>
+                  Basic teacher information used in the statement.
+                </p>
+                <div className="table">
+                  <div className="table-head">
+                    <div>Field</div>
+                    <div>Value</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Name</div>
+                    <div>{teacherStatement.teacher?.name}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Department</div>
+                    <div>{teacherStatement.teacher?.department}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Phone</div>
+                    <div>{teacherStatement.teacher?.phone}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Monthly Salary</div>
+                    <div>{teacherStatement.teacher?.salary}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Statement Through</div>
+                    <div>{teacherStatement.through_month_shamsi}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="panel">
+                <h3>Salary Summary</h3>
+                <p className="muted-panel" style={{ marginBottom: 12 }}>
+                  Expected = salary for each month. Paid = recorded salary payments. Due = remaining balance.
+                </p>
+                <div className="table">
+                  <div className="table-head">
+                    <div>Type</div>
+                    <div>Expected</div>
+                    <div>Paid</div>
+                    <div>Due</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Monthly Salary</div>
+                    <div>{teacherStatement.summary?.total_expected}</div>
+                    <div>{teacherStatement.summary?.total_paid}</div>
+                    <div>{teacherStatement.summary?.total_balance || teacherStatement.summary?.total_due}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="panel" style={{ overflowX: "auto" }}>
+                <h3>Monthly Breakdown</h3>
+                <p className="muted-panel" style={{ marginBottom: 12 }}>
+                  One row per month, showing salary due and salary payments.
+                </p>
+                <div className="table" style={{ minWidth: 760 }}>
+                  <div className="table-head">
+                    <div>Month</div>
+                    <div>Expected Salary</div>
+                    <div>Paid Salary</div>
+                    <div>Due Salary</div>
+                  </div>
+                  {(teacherStatement.months || []).map((row) => (
+                    <div className="table-row" key={row.month_shamsi}>
+                      <div>{row.month_shamsi}</div>
+                      <div>{row.expected_salary}</div>
+                      <div>{row.paid_salary}</div>
+                      <div>{row.due_salary}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="panel">
+                <h3>Salary Payments</h3>
+                <p className="muted-panel" style={{ marginBottom: 12 }}>
+                  Every salary payment recorded for this teacher in the selected range.
+                </p>
+                <div className="table">
+                  <div className="table-head">
+                    <div>Date</div>
+                    <div>Amount</div>
+                    <div>Notes</div>
+                  </div>
+                  {(teacherStatement.salary_payments || []).map((payment) => (
+                    <div className="table-row" key={payment.id}>
+                      <div>{payment.date_shamsi}</div>
+                      <div>{payment.amount}</div>
+                      <div>{payment.notes || "—"}</div>
+                    </div>
+                  ))}
+                </div>
+                {!teacherStatement.salary_payments?.length ? (
+                  <div className="muted-panel" style={{ marginTop: 12 }}>
+                    No salary payments found for this statement range.
+                  </div>
+                ) : null}
+              </div>
+            </>
           ) : null}
         </>
       ) : null}
@@ -692,3 +1767,4 @@ export default function Reports() {
     </div>
   );
 }
+

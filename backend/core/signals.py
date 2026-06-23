@@ -14,6 +14,7 @@ def ensure_default_fee_types(sender, **kwargs):
         ("Transport", False),
         ("Uniform", False),
         ("Book", False),
+        ("Previous Balance", False),
         ("Other", True),
     ]
 

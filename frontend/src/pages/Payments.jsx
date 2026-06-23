@@ -215,8 +215,10 @@ export default function Payments() {
   const deriveFeeAmount = (student, feeTypeId) => {
     const classEntry = classes.find((cls) => cls.id === student?.school_class);
     const typeEntry = feeTypes.find((type) => String(type.id) === String(feeTypeId));
-    if (!classEntry || !typeEntry) return "";
+    if (!typeEntry) return "";
     const typeName = typeEntry.name.toLowerCase();
+    if (typeName.includes("previous balance")) return student?.previous_balance || "";
+    if (!classEntry) return "";
     if (typeName.includes("monthly")) return student?.monthly_fee_override || classEntry.monthly_fee;
     if (typeName.includes("transport")) return student?.transport_fee_override || classEntry.transport_fee;
     if (typeName.includes("uniform")) return student?.uniform_fee_override || classEntry.uniform_fee;
@@ -469,6 +471,13 @@ export default function Payments() {
             <div className="status-message">Edit mode updates one payment row only.</div>
           ) : null}
         </form>
+        {selectedStudent ? (
+          <div className="muted-panel" style={{ marginTop: 12 }}>
+            Previous year balance on student record: <strong>{selectedStudent.previous_balance || "0.00"}</strong>. Use the
+            <strong> Previous Balance </strong>
+            fee type when the student pays old debt so the reports reduce it correctly.
+          </div>
+        ) : null}
         <div className="panel" style={{ marginTop: 12 }}>
           <h4>Fee Items (Multiple allowed)</h4>
           <div className="table">
