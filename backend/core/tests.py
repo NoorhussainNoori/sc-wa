@@ -11,7 +11,7 @@ from django.test import TestCase
 from rest_framework.test import APITestCase
 
 from .backup_fixture import repair_backup_fixture_shamsi_dates
-from .models import FeeType, Payment, SchoolClass, Student, Teacher, TeacherSalaryPayment
+from .models import Expense, ExpenseCategory, FeeType, Payment, SchoolClass, Student, Teacher, TeacherSalaryPayment
 
 
 class TestCoreSmokeTests(APITestCase):
@@ -445,6 +445,43 @@ class TestCoreSmokeTests(APITestCase):
         )
         self.assertEqual(blocked.status_code, 400, blocked.data)
         self.assertIn("date_shamsi", blocked.data)
+
+    def test_expense_category_statement_report(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+        category = ExpenseCategory.objects.create(name="Utilities")
+        other_category = ExpenseCategory.objects.create(name="Supplies")
+        Expense.objects.create(
+            category=category,
+            amount=Decimal("1200.00"),
+            date_shamsi=jdatetime.date(1404, 1, 10),
+            paid_by="Admin",
+            description="Electricity",
+        )
+        Expense.objects.create(
+            category=category,
+            amount=Decimal("800.00"),
+            date_shamsi=jdatetime.date(1404, 1, 18),
+            paid_by="Admin",
+            description="Water",
+        )
+        Expense.objects.create(
+            category=other_category,
+            amount=Decimal("999.00"),
+            date_shamsi=jdatetime.date(1404, 1, 20),
+            paid_by="Admin",
+            description="Should not appear",
+        )
+
+        res = self.client.get(
+            f"/api/reports/expense-statement/?category_id={category.id}&start=1404-01-01&end=1404-01-30"
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["category"]["id"], category.id)
+        self.assertEqual(res.data["summary"]["total_amount"], "2000.00")
+        self.assertEqual(res.data["summary"]["expenses_count"], 2)
+        self.assertEqual(len(res.data["expenses"]), 2)
+        self.assertEqual(res.data["expenses"][0]["description"], "Electricity")
+        self.assertEqual(res.data["expenses"][1]["description"], "Water")
 
 
 class BackupFixtureRepairTests(TestCase):

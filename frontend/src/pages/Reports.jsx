@@ -65,6 +65,13 @@ export default function Reports() {
   const [teacherStatementError, setTeacherStatementError] = useState("");
   const [loadingTeacherSearch, setLoadingTeacherSearch] = useState(false);
   const [loadingTeacherStatement, setLoadingTeacherStatement] = useState(false);
+  const [expenseCategories, setExpenseCategories] = useState([]);
+  const [selectedExpenseCategoryId, setSelectedExpenseCategoryId] = useState("");
+  const [expenseStatementStart, setExpenseStatementStart] = useState("");
+  const [expenseStatementEnd, setExpenseStatementEnd] = useState("");
+  const [expenseStatement, setExpenseStatement] = useState(null);
+  const [expenseStatementError, setExpenseStatementError] = useState("");
+  const [loadingExpenseStatement, setLoadingExpenseStatement] = useState(false);
 
   const classFeesGridStyle = {
     gridTemplateColumns: "minmax(150px, 1.3fr) 72px repeat(7, minmax(86px, 1fr)) 64px",
@@ -217,6 +224,40 @@ export default function Reports() {
 
   const onSelectTeacher = (teacher) => {
     setSelectedTeacher(teacher);
+  };
+
+  const loadExpenseCategories = async () => {
+    try {
+      const data = await apiFetch("/expense-categories/?page_size=100");
+      setExpenseCategories(extractListData(data));
+    } catch (err) {
+      setExpenseStatementError(err.message || "Failed to load expense categories.");
+    }
+  };
+
+  const loadExpenseStatement = async () => {
+    if (!selectedExpenseCategoryId) {
+      setExpenseStatementError("Select an expense category first.");
+      return;
+    }
+    setExpenseStatementError("");
+    setLoadingExpenseStatement(true);
+    try {
+      const params = new URLSearchParams({
+        category_id: String(selectedExpenseCategoryId),
+      });
+      if (expenseStatementStart && expenseStatementEnd) {
+        params.set("start", expenseStatementStart);
+        params.set("end", expenseStatementEnd);
+      }
+      const data = await apiFetch(`/reports/expense-statement/?${params.toString()}`);
+      setExpenseStatement(data);
+    } catch (err) {
+      setExpenseStatementError(err.message || "Failed to load expense statement.");
+      setExpenseStatement(null);
+    } finally {
+      setLoadingExpenseStatement(false);
+    }
   };
 
   const exportClassMonthCsv = () => {
@@ -774,6 +815,116 @@ export default function Reports() {
     reportWindow.print();
   };
 
+  const exportExpenseStatementCsv = () => {
+    if (!expenseStatement) return;
+    const lines = [];
+    lines.push(`Category,${csvSafe(expenseStatement.category?.name)}`);
+    lines.push(`Start,${csvSafe(expenseStatement.filters?.start)}`);
+    lines.push(`End,${csvSafe(expenseStatement.filters?.end)}`);
+    lines.push(`Total Amount,${csvSafe(expenseStatement.summary?.total_amount)}`);
+    lines.push(`Expenses Count,${csvSafe(expenseStatement.summary?.expenses_count)}`);
+    lines.push("");
+    lines.push("Expenses");
+    lines.push("ID,Date,Amount,Paid By,Description");
+    (expenseStatement.expenses || []).forEach((item) => {
+      lines.push(
+        [
+          item.id,
+          csvSafe(item.date_shamsi),
+          csvSafe(item.amount),
+          csvSafe(item.paid_by),
+          csvSafe(item.description || ""),
+        ].join(",")
+      );
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `expense_statement_${expenseStatement.category?.name || "category"}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const printExpenseStatement = () => {
+    if (!expenseStatement) return;
+    const reportWindow = window.open("", "_blank", "width=1100,height=900");
+    if (!reportWindow) return;
+    const expenseRows = (expenseStatement.expenses || [])
+      .map(
+        (item) => `
+          <tr>
+            <td>${escapeHtml(item.date_shamsi)}</td>
+            <td>${escapeHtml(item.amount)}</td>
+            <td>${escapeHtml(item.paid_by)}</td>
+            <td>${escapeHtml(item.description || "")}</td>
+          </tr>
+        `
+      )
+      .join("");
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Expense Statement</title>
+          <style>
+            body { font-family: "Segoe UI", Arial, sans-serif; color: #0f172a; padding: 24px; }
+            h1 { margin: 0; font-size: 1.4rem; }
+            .muted { color: #64748b; font-size: 0.9rem; }
+            .head { display:flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 16px; }
+            .summary { display:grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 14px 0 18px; }
+            .summary-card { border:1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; }
+            .summary-card .label { color:#64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+            .summary-card .value { font-size: 16px; font-weight: 700; margin-top: 4px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+            th, td { border:1px solid #e2e8f0; padding: 8px; vertical-align: top; }
+            th { background:#f8fafc; text-align:left; }
+            .signature { display:flex; justify-content: space-between; gap: 16px; margin-top: 44px; }
+            .sig-box { width: 32%; border-top: 1px solid #0f172a; padding-top: 8px; min-height: 44px; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="head">
+            <div>
+              <h1>Expense Category Statement</h1>
+              <div class="muted">${escapeHtml(expenseStatement.category?.name || "")}</div>
+            </div>
+            <div style="text-align:right">
+              <div class="muted">Start: ${escapeHtml(expenseStatement.filters?.start || "All")}</div>
+              <div class="muted">End: ${escapeHtml(expenseStatement.filters?.end || "All")}</div>
+            </div>
+          </div>
+          <div class="summary">
+            <div class="summary-card"><div class="label">Total Amount</div><div class="value">${escapeHtml(expenseStatement.summary?.total_amount || "0.00")}</div></div>
+            <div class="summary-card"><div class="label">Expenses Count</div><div class="value">${escapeHtml(expenseStatement.summary?.expenses_count || 0)}</div></div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Amount</th>
+                <th>Paid By</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>${expenseRows || '<tr><td colspan="4">No expense rows found.</td></tr>'}</tbody>
+          </table>
+          <div class="signature">
+            <div class="sig-box">Prepared By</div>
+            <div class="sig-box">Accounts / Finance</div>
+            <div class="sig-box">Authorized Signature and Stamp</div>
+          </div>
+        </body>
+      </html>
+    `;
+    reportWindow.document.write(html);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
+  };
+
   const escapeHtml = (value) => {
     const str = value === null || value === undefined ? "" : String(value);
     return str.replace(/[&<>"']/g, (ch) => {
@@ -984,6 +1135,8 @@ export default function Reports() {
                 ? "Per-class tuition and transport totals for one Shamsi month."
                 : activeTab === "studentStatement"
                   ? "A printable statement for one student, with payments, fees, and balances."
+                  : activeTab === "expenseStatement"
+                    ? "A printable statement for one expense category, with total amount and expense ledger."
                   : activeTab === "teacherStatement"
                     ? "A printable salary statement for one teacher, with monthly salary payouts and balance."
                   : "Receipt appearance for printed bills."}
@@ -1000,6 +1153,10 @@ export default function Reports() {
         ) : activeTab === "studentStatement" ? (
           <button className="button button-primary" onClick={loadStudentStatement} disabled={loadingStudentStatement}>
             {loadingStudentStatement ? "Generating..." : "Generate Statement"}
+          </button>
+        ) : activeTab === "expenseStatement" ? (
+          <button className="button button-primary" onClick={loadExpenseStatement} disabled={loadingExpenseStatement}>
+            {loadingExpenseStatement ? "Generating..." : "Generate Statement"}
           </button>
         ) : activeTab === "teacherStatement" ? (
           <button className="button button-primary" onClick={loadTeacherStatement} disabled={loadingTeacherStatement}>
@@ -1033,6 +1190,18 @@ export default function Reports() {
           onClick={() => setActiveTab("studentStatement")}
         >
           Student statement
+        </button>
+        <button
+          className={activeTab === "expenseStatement" ? "button button-primary" : "button button-outline"}
+          type="button"
+          onClick={() => {
+            setActiveTab("expenseStatement");
+            if (!expenseCategories.length) {
+              void loadExpenseCategories();
+            }
+          }}
+        >
+          Expense statement
         </button>
         <button
           className={activeTab === "teacherStatement" ? "button button-primary" : "button button-outline"}
@@ -1078,6 +1247,17 @@ export default function Reports() {
             Export CSV
           </button>
           <button className="button button-outline" type="button" onClick={printStudentStatement}>
+            Print
+          </button>
+        </div>
+      ) : null}
+
+      {activeTab === "expenseStatement" && expenseStatement ? (
+        <div className="inline-actions">
+          <button className="button button-outline" type="button" onClick={exportExpenseStatementCsv}>
+            Export CSV
+          </button>
+          <button className="button button-outline" type="button" onClick={printExpenseStatement}>
             Print
           </button>
         </div>
@@ -1497,6 +1677,110 @@ export default function Reports() {
                 {!studentStatement.payments?.length ? (
                   <div className="muted-panel" style={{ marginTop: 12 }}>
                     No payments found for this statement range.
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : null}
+        </>
+      ) : null}
+
+      {activeTab === "expenseStatement" ? (
+        <>
+          <div className="panel">
+            <h3>Statement options</h3>
+            <p className="muted-panel" style={{ marginBottom: 12 }}>
+              Select one expense category. Start and end dates are optional, but if you enter one, enter both.
+            </p>
+            <div className="form-grid">
+              <Field label="Expense Category">
+                <select
+                  className="input"
+                  value={selectedExpenseCategoryId}
+                  onChange={(event) => setSelectedExpenseCategoryId(event.target.value)}
+                >
+                  <option value="">Select category</option>
+                  {expenseCategories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Start (Shamsi YYYY-MM-DD, optional)">
+                <input
+                  className="input"
+                  value={expenseStatementStart}
+                  onChange={(event) => setExpenseStatementStart(event.target.value)}
+                  placeholder="1404-01-01"
+                />
+              </Field>
+              <Field label="End (Shamsi YYYY-MM-DD, optional)">
+                <input
+                  className="input"
+                  value={expenseStatementEnd}
+                  onChange={(event) => setExpenseStatementEnd(event.target.value)}
+                  placeholder="1404-01-30"
+                />
+              </Field>
+            </div>
+            {loadingExpenseStatement ? <div className="status-message">Generating statement...</div> : null}
+            {expenseStatementError ? <div className="form-error">{expenseStatementError}</div> : null}
+          </div>
+
+          {expenseStatement ? (
+            <>
+              <div className="stats-grid">
+                <StatCard label="Category" value={expenseStatement.category?.name || "—"} />
+                <StatCard label="Total Amount" value={expenseStatement.summary?.total_amount || "—"} />
+                <StatCard label="Expenses Count" value={expenseStatement.summary?.expenses_count || "—"} />
+              </div>
+
+              <div className="panel">
+                <h3>Statement Details</h3>
+                <div className="table">
+                  <div className="table-head">
+                    <div>Field</div>
+                    <div>Value</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Category</div>
+                    <div>{expenseStatement.category?.name}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>Start</div>
+                    <div>{expenseStatement.filters?.start || "All"}</div>
+                  </div>
+                  <div className="table-row">
+                    <div>End</div>
+                    <div>{expenseStatement.filters?.end || "All"}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="panel">
+                <h3>Expense Ledger</h3>
+                <div className="table">
+                  <div className="table-head">
+                    <div>ID</div>
+                    <div>Date</div>
+                    <div>Amount</div>
+                    <div>Paid By</div>
+                    <div>Description</div>
+                  </div>
+                  {(expenseStatement.expenses || []).map((expense) => (
+                    <div className="table-row" key={expense.id}>
+                      <div>{expense.id}</div>
+                      <div>{expense.date_shamsi}</div>
+                      <div>{expense.amount}</div>
+                      <div>{expense.paid_by}</div>
+                      <div>{expense.description || "—"}</div>
+                    </div>
+                  ))}
+                </div>
+                {!expenseStatement.expenses?.length ? (
+                  <div className="muted-panel" style={{ marginTop: 12 }}>
+                    No expense rows found for this statement range.
                   </div>
                 ) : null}
               </div>

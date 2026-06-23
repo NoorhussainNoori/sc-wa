@@ -788,6 +788,64 @@ class TeacherStatementReportView(APIView):
         )
 
 
+class ExpenseCategoryStatementReportView(APIView):
+    """
+    Printable per-category expense statement with optional date range.
+    """
+
+    def get(self, request):
+        category_id = request.query_params.get("category_id")
+        if not category_id:
+            return Response({"detail": "category_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            category = ExpenseCategory.objects.get(pk=category_id)
+        except ExpenseCategory.DoesNotExist:
+            return Response({"detail": "Expense category not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        expense_qs = Expense.objects.select_related("category").filter(category_id=category.id).order_by("date_shamsi", "id")
+
+        start = request.query_params.get("start")
+        end = request.query_params.get("end")
+        month_shamsi = request.query_params.get("month_shamsi")
+
+        if start and end:
+            try:
+                start_date = _parse_shamsi_date(start)
+                end_date = _parse_shamsi_date(end)
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            expense_qs = expense_qs.filter(date_shamsi__gte=start_date, date_shamsi__lte=end_date)
+        elif month_shamsi:
+            try:
+                year, month = _parse_shamsi_month(month_shamsi)
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            expense_qs = expense_qs.filter(date_shamsi__year=year, date_shamsi__month=month)
+
+        expenses = list(expense_qs)
+        total_amount = expense_qs.aggregate(total=Sum("amount")).get("total") or Decimal("0")
+
+        return Response(
+            {
+                "category": {
+                    "id": category.id,
+                    "name": category.name,
+                },
+                "filters": {
+                    "start": start or "",
+                    "end": end or "",
+                    "month_shamsi": month_shamsi or "",
+                },
+                "summary": {
+                    "total_amount": _money_str(total_amount),
+                    "expenses_count": len(expenses),
+                },
+                "expenses": ExpenseSerializer(expenses, many=True).data,
+            }
+        )
+
+
 class StudentStatementReportView(APIView):
     """
     Printable per-student statement with recurring fees, one-time items, and all payments.
