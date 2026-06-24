@@ -70,6 +70,7 @@ export default function Classes() {
   const [duesError, setDuesError] = useState("");
   const [duesLoading, setDuesLoading] = useState(false);
   const [duesPeriodSummary, setDuesPeriodSummary] = useState(null);
+  const [dueStudentSearch, setDueStudentSearch] = useState("");
 
   const escapeHtml = (value) => {
     const str = value === null || value === undefined ? "" : String(value);
@@ -462,7 +463,7 @@ export default function Classes() {
 
   const printAllDues = () => {
     const monthShamsi = buildMonthShamsi() || "";
-    printDuesWindow({ title: "Monthly Dues (All Students)", duesToPrint: dues, monthShamsi });
+    printDuesWindow({ title: "Monthly Dues (All Students)", duesToPrint: filteredDues, monthShamsi });
   };
 
   const printOneDue = (due) => {
@@ -474,7 +475,20 @@ export default function Classes() {
     });
   };
 
-  const dueIsEmpty = duesLoading || dues.length === 0;
+  const filteredDues = dues.filter((d) => {
+    const q = String(dueStudentSearch || "").trim().toLowerCase();
+    if (!q) return true;
+    return [
+      d.student_name,
+      d.registration_number,
+      d.father_name,
+      d.grandfather_name,
+      d.phone,
+      d.class_name,
+    ].some((value) => String(value || "").toLowerCase().includes(q));
+  });
+
+  const dueIsEmpty = duesLoading || filteredDues.length === 0;
 
   const onChange = (field) => (event) => {
     setForm((prev) => ({ ...prev, [field]: event.target.value }));
@@ -727,6 +741,14 @@ export default function Classes() {
                 ))}
               </select>
             </Field>
+            <Field label="Student Search">
+              <input
+                className="input"
+                value={dueStudentSearch}
+                onChange={(event) => setDueStudentSearch(event.target.value)}
+                placeholder="Name, phone, reg no, father..."
+              />
+            </Field>
           </div>
 
           <div className="inline-actions" style={{ marginBottom: 12 }}>
@@ -751,7 +773,7 @@ export default function Classes() {
           {duesError ? <div className="form-error">{duesError}</div> : null}
 
           <div className="dues-cards">
-            {dues.map((d) => (
+            {filteredDues.map((d) => (
               <div className="due-card" key={d.student_id}>
                 <div className="due-card-title">Monthly & transport due</div>
                 <div className="due-card-row">
@@ -797,9 +819,9 @@ export default function Classes() {
             ))}
           </div>
 
-          {dues.length === 0 && !duesLoading ? (
+          {filteredDues.length === 0 && !duesLoading ? (
             <div className="muted-panel" style={{ marginTop: 12 }}>
-              No dues for the selected month.
+              No dues found for the selected filters.
             </div>
           ) : null}
         </div>
