@@ -603,3 +603,129 @@ class BackupExportTests(APITestCase):
         self.assertIsInstance(data, list)
         user_rows = [row for row in data if row.get("model") == "auth.user"]
         self.assertTrue(any(row.get("fields", {}).get("username") == "b" for row in user_rows))
+
+
+class PaymentAllocationTests(TestCase):
+    def setUp(self):
+        self.school_class = SchoolClass.objects.create(
+            name="3rd A Morning",
+            year_shamsi="1405",
+            monthly_fee=Decimal("800.00"),
+            transport_fee=Decimal("500.00"),
+            uniform_fee=Decimal("0.00"),
+            book_fee=Decimal("800.00"),
+        )
+        self.monthly_fee_type, _ = FeeType.objects.get_or_create(name="Monthly", defaults={"requires_reason": False})
+        self.transport_fee_type, _ = FeeType.objects.get_or_create(name="Transport", defaults={"requires_reason": False})
+        self.book_fee_type, _ = FeeType.objects.get_or_create(name="Book", defaults={"requires_reason": False})
+        self.student = Student.objects.create(
+            school_class=self.school_class,
+            name="Abdulrahman",
+            registration_number="390",
+            father_name="Abdul Qadier",
+            grandfather_name="x",
+            phone="700000001",
+            monthly_fee_override=Decimal("500.00"),
+            transport_fee_override=Decimal("250.00"),
+            book_fee_override=Decimal("400.00"),
+            created_at=timezone.make_aware(jdatetime.datetime(1405, 1, 16, 10, 0, 0).togregorian()),
+        )
+
+    def test_lump_monthly_payment_splits_across_unpaid_months(self):
+        from .serializers import PaymentSerializer
+
+        serializer = PaymentSerializer(
+            data={
+                "student": self.student.id,
+                "fee_type": self.monthly_fee_type.id,
+                "amount": "1500.00",
+                "date_shamsi": "1405-02-01",
+                "bill_number": "1776753192215135",
+            }
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save()
+        self.assertEqual(Payment.objects.filter(student=self.student, fee_type=self.monthly_fee_type).count(), 3)
+        months = list(
+            Payment.objects.filter(student=self.student, fee_type=self.monthly_fee_type)
+            .order_by("month_shamsi")
+            .values_list("month_shamsi", "amount")
+        )
+        self.assertEqual(
+            months,
+            [("1405-01", Decimal("500.00")), ("1405-02", Decimal("500.00")), ("1405-03", Decimal("500.00"))],
+        )
+
+    def test_named_month_reason_allocates_to_that_month(self):
+        from .serializers import PaymentSerializer
+
+        for reason in ("Hamal", "Sawar", "Jawza"):
+            serializer = PaymentSerializer(
+                data={
+                    "student": self.student.id,
+                    "fee_type": self.monthly_fee_type.id,
+                    "amount": "500.00",
+                    "date_shamsi": "1405-02-01",
+                    "other_reason": reason,
+                    "bill_number": "1776753192215136",
+                }
+            )
+            self.assertTrue(serializer.is_valid(), serializer.errors)
+            serializer.save()
+        months = list(
+            Payment.objects.filter(student=self.student, fee_type=self.monthly_fee_type)
+            .order_by("month_shamsi")
+            .values_list("month_shamsi", flat=True)
+        )
+        self.assertEqual(months, ["1405-01", "1405-02", "1405-03"])
+
+    def test_fix_payment_months_command_rewrites_legacy_rows(self):
+        Payment.objects.create(
+            student=self.student,
+            fee_type=self.monthly_fee_type,
+            amount=Decimal("500.00"),
+            date_shamsi=jdatetime.date(1405, 2, 1),
+            month_shamsi="1405-02",
+            other_reason="Hamal",
+            bill_number="1776753192215137",
+        )
+        Payment.objects.create(
+            student=self.student,
+            fee_type=self.monthly_fee_type,
+            amount=Decimal("500.00"),
+            date_shamsi=jdatetime.date(1405, 2, 1),
+            month_shamsi="1405-02",
+            other_reason="Sawar",
+            bill_number="1776753192215137",
+        )
+        Payment.objects.create(
+            student=self.student,
+            fee_type=self.monthly_fee_type,
+            amount=Decimal("500.00"),
+            date_shamsi=jdatetime.date(1405, 2, 1),
+            month_shamsi="1405-02",
+            other_reason="Jawza",
+            bill_number="1776753192215137",
+        )
+
+        from django.core.management import call_command
+
+        call_command("fix_payment_months", registration_number="390")
+        months = list(
+            Payment.objects.filter(student=self.student, fee_type=self.monthly_fee_type)
+            .order_by("month_shamsi")
+            .values_list("month_shamsi", flat=True)
+        )
+        self.assertEqual(months, ["1405-01", "1405-02", "1405-03"])
+
+    def test_book_payment_is_not_reallocated(self):
+        Payment.objects.create(
+            student=self.student,
+            fee_type=self.book_fee_type,
+            amount=Decimal("400.00"),
+            date_shamsi=jdatetime.date(1405, 2, 1),
+            bill_number="1776753192215138",
+        )
+        self.assertEqual(Payment.objects.filter(student=self.student, fee_type=self.book_fee_type).count(), 1)
+        payment = Payment.objects.get(student=self.student, fee_type=self.book_fee_type)
+        self.assertEqual(payment.month_shamsi, "1405-02")

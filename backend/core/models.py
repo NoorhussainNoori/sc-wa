@@ -181,7 +181,12 @@ class Payment(models.Model):
         if not self.bill_number:
             self.bill_number = timezone.now().strftime("%y%m%d%H%M%S%f")[:16]
         if self.date_shamsi:
-            self.month_shamsi = f"{self.date_shamsi.year:04d}-{self.date_shamsi.month:02d}"
+            fee_name = ""
+            if self.fee_type_id and getattr(self, "fee_type", None):
+                fee_name = (self.fee_type.name or "").lower()
+            recurring_fee = "monthly" in fee_name or "transport" in fee_name
+            if not recurring_fee or not self.month_shamsi:
+                self.month_shamsi = f"{self.date_shamsi.year:04d}-{self.date_shamsi.month:02d}"
         if self.student and not self.school_class:
             self.school_class = self.student.school_class
         super().save(*args, **kwargs)

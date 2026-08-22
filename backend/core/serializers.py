@@ -1,7 +1,17 @@
+from django.db import transaction
 from django.utils import timezone
 from django_jalali.serializers.serializerfield import JDateField
 from rest_framework import serializers
 
+from .payment_allocation import (
+    PaymentEvent,
+    fee_category,
+    fee_types_for_category,
+    is_allocatable_fee_type,
+    payment_to_event,
+    replay_events,
+    replace_student_category_payments,
+)
 from .models import (
     Student,
     Teacher,
@@ -113,12 +123,92 @@ class PaymentSerializer(serializers.ModelSerializer):
             )
         return attrs
 
+    def _event_from_validated(self, validated_data, *, source_id=None):
+        fee_type = validated_data["fee_type"]
+        school_class = validated_data.get("school_class")
+        return PaymentEvent(
+            amount=validated_data["amount"],
+            date_shamsi=validated_data["date_shamsi"],
+            bill_number=validated_data.get("bill_number") or "",
+            notes=validated_data.get("notes") or "",
+            other_reason=validated_data.get("other_reason") or "",
+            fee_type_id=fee_type.id,
+            school_class_id=school_class.id if school_class else None,
+            created_at=timezone.now(),
+            source_id=source_id,
+        )
+
+    def _replay_allocatable_payment(self, student, fee_type, events):
+        category = fee_category(fee_type.name)
+        if not category:
+            return None
+        target_rows = replay_events(student, category, events)
+        replace_student_category_payments(student, category, target_rows)
+        return category
+
+    def _find_created_payment(self, student, fee_type, bill_number):
+        return (
+            Payment.objects.filter(student=student, fee_type=fee_type, bill_number=bill_number)
+            .order_by("id")
+            .first()
+        )
+
+    @transaction.atomic
     def create(self, validated_data):
         if not validated_data.get("bill_number"):
             validated_data["bill_number"] = timezone.now().strftime("%y%m%d%H%M%S%f")[:16]
         if validated_data.get("student") and not validated_data.get("school_class"):
             validated_data["school_class"] = validated_data["student"].school_class
+
+        fee_type = validated_data["fee_type"]
+        student = validated_data["student"]
+        if is_allocatable_fee_type(fee_type):
+            category = fee_category(fee_type.name)
+            existing = Payment.objects.filter(
+                student=student,
+                fee_type__in=fee_types_for_category(category),
+            ).order_by("date_shamsi", "created_at", "id")
+            events = [payment_to_event(payment) for payment in existing]
+            events.append(self._event_from_validated(validated_data))
+            self._replay_allocatable_payment(student, fee_type, events)
+            return self._find_created_payment(student, fee_type, validated_data["bill_number"])
+
         return super().create(validated_data)
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        fee_type = validated_data.get("fee_type", instance.fee_type)
+        student = validated_data.get("student", instance.student)
+        if not is_allocatable_fee_type(fee_type):
+            return super().update(instance, validated_data)
+
+        merged = {
+            "fee_type": fee_type,
+            "student": student,
+            "school_class": validated_data.get("school_class", instance.school_class),
+            "amount": validated_data.get("amount", instance.amount),
+            "date_shamsi": validated_data.get("date_shamsi", instance.date_shamsi),
+            "bill_number": validated_data.get("bill_number", instance.bill_number),
+            "notes": validated_data.get("notes", instance.notes),
+            "other_reason": validated_data.get("other_reason", instance.other_reason),
+        }
+        category = fee_category(fee_type.name)
+        existing = Payment.objects.filter(
+            student=student,
+            fee_type__in=fee_types_for_category(category),
+        ).order_by("date_shamsi", "created_at", "id")
+        events = []
+        for payment in existing:
+            if payment.id == instance.id:
+                events.append(self._event_from_validated(merged, source_id=payment.id))
+            else:
+                events.append(payment_to_event(payment))
+
+        self._replay_allocatable_payment(student, fee_type, events)
+        if Payment.objects.filter(pk=instance.pk).exists():
+            instance.refresh_from_db()
+            return instance
+        return self._find_created_payment(student, fee_type, merged["bill_number"]) or instance
 
 
 class ExpenseCategorySerializer(serializers.ModelSerializer):

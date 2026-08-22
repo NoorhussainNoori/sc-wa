@@ -1,0 +1,26 @@
+{
+  "note": "Recovered summary from compare run on 20260822_110736 (before folder was deleted).",
+  "before_file": "payment_snapshot_before_fix_20260822_110455.json",
+  "after_file": "payment_snapshot_after_fix_20260822_110633.json",
+  "issues": [],
+  "money_totals_unchanged": true,
+  "kpi_diff": {
+    "total_payment_rows": { "before": 3209, "after": 3041 },
+    "zero_amount_payment_rows": { "before": 288, "after": 111 },
+    "zero_amount_monthly_rows": { "before": 107, "after": 0 },
+    "zero_amount_transport_rows": { "before": 70, "after": 0 },
+    "students_with_due_through_month": { "before": 806, "after": 797 },
+    "aggregate_due_monthly": { "before": "1792200.00", "after": "1365100.00" },
+    "aggregate_due_transport": { "before": "131350.00", "after": "108500.00" },
+    "aggregate_due_total": { "before": "1923550.00", "after": "1473600.00" },
+    "students_would_change_on_fix": { "before": 636, "after": 0 }
+  },
+  "unchanged_kpis": {
+    "total_payment_amount": "2075830.00",
+    "monthly_payment_amount": "1439950.00",
+    "transport_payment_amount": "68300.00"
+  },
+  "deleted_payment_rows": 177,
+  "created_payment_rows": 9,
+  "students_with_due_total_change": 457
+}

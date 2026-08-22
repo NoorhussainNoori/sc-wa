@@ -1,0 +1,48 @@
+{
+  "meta": {
+    "label": "payment_baseline",
+    "note": "KPI-only recovery after snapshots folder was deleted. Full row-level snapshot is not recoverable without re-importing the backup on a copy of the database.",
+    "original_file": "payment_snapshot_before_fix_20260822_110455.json",
+    "captured_at_shamsi": "1405-05-22 (approx, from session)",
+    "through_month_shamsi": "1405-05"
+  },
+  "kpis": {
+    "total_students_with_class": 919,
+    "active_students_with_class": 918,
+    "total_payment_rows": 3209,
+    "total_payment_amount": "2075830.00",
+    "monthly_payment_amount": "1439950.00",
+    "transport_payment_amount": "68300.00",
+    "zero_amount_payment_rows": 288,
+    "zero_amount_monthly_rows": 107,
+    "zero_amount_transport_rows": 70,
+    "students_with_due_through_month": 806,
+    "aggregate_due_monthly": "1792200.00",
+    "aggregate_due_transport": "131350.00",
+    "aggregate_due_total": "1923550.00",
+    "students_would_change_on_fix": 636,
+    "payment_rows_in_checksum": 3209
+  },
+  "monthly_by_month_shamsi": {
+    "1405-01": { "count": 322, "total": "193500.00" },
+    "1405-02": { "count": 538, "total": "363450.00" },
+    "1405-03": { "count": 447, "total": "302900.00" },
+    "1405-04": { "count": 833, "total": "567000.00" },
+    "1405-10": { "count": 18, "total": "12600.00" },
+    "1406-10": { "count": 1, "total": "500.00" }
+  },
+  "transport_by_month_shamsi": {
+    "1405-01": { "count": 28, "total": "11600.00" },
+    "1405-02": { "count": 42, "total": "18300.00" },
+    "1405-03": { "count": 70, "total": "12950.00" },
+    "1405-04": { "count": 77, "total": "24450.00" },
+    "1405-10": { "count": 2, "total": "1000.00" }
+  },
+  "payments_by_fee_type": {
+    "Book": { "count": 641, "total": "491230.00" },
+    "Monthly": { "count": 2159, "total": "1439950.00" },
+    "Previous Balance": { "count": 20, "total": "3550.00" },
+    "Transport": { "count": 219, "total": "68300.00" },
+    "Uniform": { "count": 170, "total": "72800.00" }
+  }
+}

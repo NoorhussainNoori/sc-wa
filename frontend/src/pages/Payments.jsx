@@ -477,6 +477,10 @@ export default function Payments() {
             Previous year balance on student record: <strong>{selectedStudent.previous_balance || "0.00"}</strong>. Use the
             <strong> Previous Balance </strong>
             fee type when the student pays old debt so the reports reduce it correctly.
+            {" "}
+            For <strong>Monthly</strong> and <strong>Transport</strong>, one amount can cover several months — the system
+            applies it to the oldest unpaid months first. You can still type a month name (Hamal, Sawar, Jawza, …) in
+            Reason to pay a specific month.
           </div>
         ) : null}
         <div className="panel" style={{ marginTop: 12 }}>
@@ -554,6 +558,7 @@ export default function Payments() {
             <div>ID</div>
             <div>Type</div>
             <div>Amount</div>
+            <div>For Month</div>
             <div>Date</div>
             <div>Reason</div>
             <div>Actions</div>
@@ -564,6 +569,7 @@ export default function Payments() {
               <div>{payment.id}</div>
               <div>{payment.fee_type_name || payment.fee_type}</div>
               <div>{payment.amount}</div>
+              <div>{payment.month_shamsi || "—"}</div>
               <div>{payment.date_shamsi}</div>
               <div>{payment.other_reason || "—"}</div>
               <div className="inline-actions">

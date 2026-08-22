@@ -19,6 +19,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .backup_fixture import build_dumpdata_backup_json, repair_backup_fixture_shamsi_dates
+from .payment_allocation import is_allocatable_fee_type, replay_after_payment_change
 from .models import (
     Student,
     Teacher,
@@ -29,6 +30,7 @@ from .models import (
     ExpenseCategory,
     Expense,
 )
+from .signals import suppress_default_fee_types
 from .serializers import (
     StudentSerializer,
     TeacherSerializer,
@@ -255,6 +257,13 @@ class FeeTypeViewSet(viewsets.ModelViewSet):
 class PaymentViewSet(viewsets.ModelViewSet):
     queryset = Payment.objects.select_related("student", "fee_type").all().order_by("-created_at")
     serializer_class = PaymentSerializer
+
+    def perform_destroy(self, instance):
+        student = instance.student
+        fee_type = instance.fee_type
+        super().perform_destroy(instance)
+        if student and is_allocatable_fee_type(fee_type):
+            replay_after_payment_change(student, fee_type)
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1116,7 +1125,10 @@ class BackupRestoreView(APIView):
             with os.fdopen(fd, "wb") as tmp:
                 tmp.write(fixed_body)
             try:
-                call_command("flush", interactive=False)
+                # Suppress post_migrate FeeType seeding so flush does not leave
+                # rows that conflict with backup PKs during loaddata.
+                with suppress_default_fee_types():
+                    call_command("flush", interactive=False)
             except Exception as exc:  # noqa: BLE001
                 return Response(
                     {"detail": f"Could not clear database: {exc}"},

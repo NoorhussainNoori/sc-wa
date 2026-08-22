@@ -6,6 +6,7 @@ from django.core.management import call_command
 from django.core.management.base import BaseCommand
 
 from core.backup_fixture import repair_backup_fixture_shamsi_dates
+from core.signals import suppress_default_fee_types
 
 
 class Command(BaseCommand):
@@ -36,7 +37,10 @@ class Command(BaseCommand):
             with os.fdopen(fd, "w", encoding="utf-8") as tmp:
                 json.dump(rows, tmp, indent=2, ensure_ascii=False)
             if not options["no_flush"]:
-                call_command("flush", interactive=False)
+                # Suppress post_migrate FeeType seeding so flush does not leave
+                # rows that conflict with backup PKs during loaddata.
+                with suppress_default_fee_types():
+                    call_command("flush", interactive=False)
                 self.stdout.write(self.style.WARNING("Database flushed."))
             call_command("loaddata", tmp_path)
         finally:
