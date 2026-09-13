@@ -7,7 +7,8 @@ from core.payment_allocation import replay_allocatable_payments_for_student
 
 class Command(BaseCommand):
     help = (
-        "Re-allocate Monthly and Transport payments to the correct Shamsi months using FIFO. "
+        "Re-allocate Monthly and Transport payments to the correct Shamsi months using FIFO "
+        "(including advance payments that cover future months in the same year). "
         "Use --dry-run first to review changes."
     )
 
@@ -30,7 +31,11 @@ class Command(BaseCommand):
         parser.add_argument(
             "--through-month",
             type=str,
-            help="Billable months end at this Shamsi month (YYYY-MM). Defaults to today.",
+            help=(
+                "Optional Shamsi month (YYYY-MM) to end allocation. "
+                "Default: end of the current Shamsi year (YYYY-12), so advance "
+                "payments can credit future months."
+            ),
         )
 
     def handle(self, *args, **options):

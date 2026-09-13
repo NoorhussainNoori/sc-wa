@@ -2,6 +2,7 @@
 Allocate Monthly / Transport payments to Shamsi months (FIFO + optional month name in reason).
 
 Dues reports credit payments by `month_shamsi`, not payment date or free-text reason.
+Allocation spans the Shamsi year through YYYY-12 so advance payments can credit future months.
 """
 
 from __future__ import annotations
@@ -125,6 +126,7 @@ def student_reporting_end_month_shamsi(student: Student, requested_month_shamsi:
 
 
 def student_billable_months(student: Student, through_month: str | None = None) -> list[str]:
+    """Months used for dues/reporting (expected fees through a month)."""
     end_month = through_month or current_shamsi_month()
     end_month = student_reporting_end_month_shamsi(student, end_month)
     year = end_month.split("-", 1)[0]
@@ -132,6 +134,25 @@ def student_billable_months(student: Student, through_month: str | None = None) 
     if start_month > end_month:
         return []
     return iter_shamsi_months(start_month, end_month)
+
+
+def resolve_allocation_through_month(through_month: str | None = None) -> str:
+    """
+    End month for FIFO payment allocation.
+
+    Defaults to the end of the current Shamsi year (YYYY-12) so paying ahead
+    (e.g. month 4 covering month 5) credits future months in the same year.
+    An explicit through_month still wins (for scripts/tests).
+    """
+    if through_month:
+        return through_month
+    year, _ = parse_shamsi_month(current_shamsi_month())
+    return f"{year:04d}-12"
+
+
+def student_allocation_months(student: Student, through_month: str | None = None) -> list[str]:
+    """Months used when allocating/replaying Monthly and Transport payments."""
+    return student_billable_months(student, resolve_allocation_through_month(through_month))
 
 
 def fee_category(name: str) -> str | None:
@@ -283,7 +304,7 @@ def replay_events(
     if not events:
         return []
 
-    billable_months = student_billable_months(student, through_month)
+    billable_months = student_allocation_months(student, through_month)
     expected_fee = student_expected_fee(student, category)
     paid_by_month: dict[str, Decimal] = {month: Decimal("0") for month in billable_months}
 

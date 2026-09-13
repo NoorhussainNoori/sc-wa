@@ -731,3 +731,83 @@ class PaymentAllocationTests(TestCase):
         self.assertEqual(Payment.objects.filter(student=self.student, fee_type=self.book_fee_type).count(), 1)
         payment = Payment.objects.get(student=self.student, fee_type=self.book_fee_type)
         self.assertEqual(payment.month_shamsi, "1405-02")
+
+    def test_advance_payment_credits_future_month_in_same_year(self):
+        from .serializers import PaymentSerializer
+
+        for month_num in (1, 2, 3):
+            Payment.objects.create(
+                student=self.student,
+                fee_type=self.monthly_fee_type,
+                amount=Decimal("500.00"),
+                date_shamsi=jdatetime.date(1405, month_num, 1),
+                month_shamsi=f"1405-{month_num:02d}",
+                bill_number=f"paid-1405-{month_num:02d}",
+            )
+
+        serializer = PaymentSerializer(
+            data={
+                "student": self.student.id,
+                "fee_type": self.monthly_fee_type.id,
+                "amount": "1000.00",
+                "date_shamsi": "1405-04-10",
+                "bill_number": "14050410001",
+            }
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save()
+
+        months = list(
+            Payment.objects.filter(student=self.student, fee_type=self.monthly_fee_type)
+            .order_by("month_shamsi")
+            .values_list("month_shamsi", "amount")
+        )
+        self.assertEqual(
+            months,
+            [
+                ("1405-01", Decimal("500.00")),
+                ("1405-02", Decimal("500.00")),
+                ("1405-03", Decimal("500.00")),
+                ("1405-04", Decimal("500.00")),
+                ("1405-05", Decimal("500.00")),
+            ],
+        )
+
+    def test_fix_command_reallocates_overpayment_stuck_on_current_month(self):
+        for month_num in (1, 2, 3):
+            Payment.objects.create(
+                student=self.student,
+                fee_type=self.monthly_fee_type,
+                amount=Decimal("500.00"),
+                date_shamsi=jdatetime.date(1405, month_num, 1),
+                month_shamsi=f"1405-{month_num:02d}",
+                bill_number=f"legacy-1405-{month_num:02d}",
+            )
+        # Old behavior: double payment in month 4 all tagged to 1405-04
+        Payment.objects.create(
+            student=self.student,
+            fee_type=self.monthly_fee_type,
+            amount=Decimal("1000.00"),
+            date_shamsi=jdatetime.date(1405, 4, 10),
+            month_shamsi="1405-04",
+            bill_number="legacy-advance",
+        )
+
+        from django.core.management import call_command
+
+        call_command("fix_payment_months", registration_number="390")
+        months = list(
+            Payment.objects.filter(student=self.student, fee_type=self.monthly_fee_type)
+            .order_by("month_shamsi")
+            .values_list("month_shamsi", "amount")
+        )
+        self.assertEqual(
+            months,
+            [
+                ("1405-01", Decimal("500.00")),
+                ("1405-02", Decimal("500.00")),
+                ("1405-03", Decimal("500.00")),
+                ("1405-04", Decimal("500.00")),
+                ("1405-05", Decimal("500.00")),
+            ],
+        )
