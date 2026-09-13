@@ -74,9 +74,28 @@ export default function Reports() {
   const [loadingExpenseStatement, setLoadingExpenseStatement] = useState(false);
 
   const classFeesGridStyle = {
-    gridTemplateColumns: "minmax(150px, 1.3fr) 72px repeat(7, minmax(86px, 1fr)) 64px",
-    minWidth: "920px",
+    gridTemplateColumns: "minmax(160px, 1.5fr) 70px repeat(8, minmax(88px, 1fr)) 56px",
+    minWidth: "1120px",
   };
+
+  const moneySum = (...values) =>
+    values.reduce((acc, value) => acc + (Number(value) || 0), 0).toFixed(2);
+
+  const classMonthTotals = (() => {
+    const rows = classMonthReport?.classes || [];
+    return {
+      student_count: rows.reduce((acc, row) => acc + (Number(row.student_count) || 0), 0),
+      total_monthly_expected: moneySum(...rows.map((row) => row.total_monthly_expected)),
+      total_monthly_paid: moneySum(...rows.map((row) => row.total_monthly_paid)),
+      total_uniform_expected: moneySum(...rows.map((row) => row.total_uniform_expected)),
+      total_uniform_paid: moneySum(...rows.map((row) => row.total_uniform_paid)),
+      total_transport_expected: moneySum(...rows.map((row) => row.total_transport_expected)),
+      total_transport_paid: moneySum(...rows.map((row) => row.total_transport_paid)),
+      total_expected: moneySum(...rows.map((row) => row.total_expected)),
+      total_paid: moneySum(...rows.map((row) => row.total_paid)),
+      free_students_count: rows.reduce((acc, row) => acc + (Number(row.free_students_count) || 0), 0),
+    };
+  })();
   const [templateStatus, setTemplateStatus] = useState("");
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [template, setTemplate] = useState(() => {
@@ -272,12 +291,14 @@ export default function Reports() {
       [
         "Class",
         "Students",
-        "Monthly fees (total)",
-        "Transport fees (total)",
+        "Monthly fees",
         "Monthly paid",
+        "Uniform fees",
+        "Uniform paid",
+        "Transport fees",
         "Transport paid",
-        "Monthly remaining",
-        "Transport remaining",
+        "Total fees",
+        "Total paid",
         "Free students",
       ].join(",")
     );
@@ -287,15 +308,32 @@ export default function Reports() {
           `"${String(row.class_label || "").replaceAll('"', '""')}"`,
           row.student_count,
           row.total_monthly_expected,
-          row.total_transport_expected,
           row.total_monthly_paid,
+          row.total_uniform_expected,
+          row.total_uniform_paid,
+          row.total_transport_expected,
           row.total_transport_paid,
-          row.total_monthly_remaining,
-          row.total_transport_remaining,
+          row.total_expected,
+          row.total_paid,
           row.free_students_count,
         ].join(",")
       );
     });
+    lines.push(
+      [
+        "TOTAL",
+        classMonthTotals.student_count,
+        classMonthTotals.total_monthly_expected,
+        classMonthTotals.total_monthly_paid,
+        classMonthTotals.total_uniform_expected,
+        classMonthTotals.total_uniform_paid,
+        classMonthTotals.total_transport_expected,
+        classMonthTotals.total_transport_paid,
+        classMonthTotals.total_expected,
+        classMonthTotals.total_paid,
+        classMonthTotals.free_students_count,
+      ].join(",")
+    );
     const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -309,17 +347,19 @@ export default function Reports() {
 
   const printClassMonthReport = () => {
     if (!classMonthReport?.classes) return;
-    const reportWindow = window.open("", "_blank", "width=1100,height=900");
+    const reportWindow = window.open("", "_blank", "width=1400,height=900");
     if (!reportWindow) return;
     const headCells = [
       "Class",
       "Students",
-      "Monthly (total)",
-      "Transport (total)",
+      "Monthly fees",
       "Monthly paid",
+      "Uniform fees",
+      "Uniform paid",
+      "Transport fees",
       "Transport paid",
-      "Monthly remaining",
-      "Transport remaining",
+      "Total fees",
+      "Total paid",
       "Free",
     ];
     const headerRow = `<tr>${headCells.map((h) => `<th>${h}</th>`).join("")}</tr>`;
@@ -328,43 +368,67 @@ export default function Reports() {
         (r) => `
       <tr>
         <td>${String(r.class_label || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</td>
-        <td style="text-align:right">${r.student_count}</td>
-        <td style="text-align:right">${r.total_monthly_expected}</td>
-        <td style="text-align:right">${r.total_transport_expected}</td>
-        <td style="text-align:right">${r.total_monthly_paid}</td>
-        <td style="text-align:right">${r.total_transport_paid}</td>
-        <td style="text-align:right">${r.total_monthly_remaining}</td>
-        <td style="text-align:right">${r.total_transport_remaining}</td>
-        <td style="text-align:right">${r.free_students_count}</td>
+        <td>${r.student_count}</td>
+        <td>${r.total_monthly_expected}</td>
+        <td>${r.total_monthly_paid}</td>
+        <td>${r.total_uniform_expected}</td>
+        <td>${r.total_uniform_paid}</td>
+        <td>${r.total_transport_expected}</td>
+        <td>${r.total_transport_paid}</td>
+        <td><strong>${r.total_expected}</strong></td>
+        <td><strong>${r.total_paid}</strong></td>
+        <td>${r.free_students_count}</td>
       </tr>`
       )
       .join("");
+    const footerRow = `
+      <tr class="total-row">
+        <td>TOTAL</td>
+        <td>${classMonthTotals.student_count}</td>
+        <td>${classMonthTotals.total_monthly_expected}</td>
+        <td>${classMonthTotals.total_monthly_paid}</td>
+        <td>${classMonthTotals.total_uniform_expected}</td>
+        <td>${classMonthTotals.total_uniform_paid}</td>
+        <td>${classMonthTotals.total_transport_expected}</td>
+        <td>${classMonthTotals.total_transport_paid}</td>
+        <td>${classMonthTotals.total_expected}</td>
+        <td>${classMonthTotals.total_paid}</td>
+        <td>${classMonthTotals.free_students_count}</td>
+      </tr>`;
     const html = `
       <html>
         <head>
           <meta charset="utf-8" />
           <title>Class fees ${classMonthReport.month_shamsi}</title>
           <style>
-            body { font-family: "Segoe UI", Arial, sans-serif; padding: 24px; color: #0f172a; }
-            h1 { font-size: 1.25rem; margin: 0 0 8px; }
-            .muted { color: #64748b; font-size: 0.9rem; margin-bottom: 16px; }
-            table { width: 100%; border-collapse: collapse; font-size: 12px; }
-            th, td { border: 1px solid #e2e8f0; padding: 8px; }
-            th { background: #f8fafc; text-align: left; }
+            @page { size: A4 landscape; margin: 10mm; }
+            * { box-sizing: border-box; }
+            body { font-family: "Segoe UI", Arial, sans-serif; padding: 12px; color: #0f172a; }
+            h1 { font-size: 1.1rem; margin: 0 0 4px; }
+            .muted { color: #64748b; font-size: 0.85rem; margin-bottom: 12px; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; table-layout: fixed; }
+            th, td { border: 1px solid #cbd5e1; padding: 6px 5px; vertical-align: middle; }
+            th { background: #f1f5f9; text-align: left; font-size: 10px; }
             td:nth-child(n + 2) { text-align: right; }
-            .note { margin-top: 16px; font-size: 11px; color: #64748b; max-width: 720px; }
+            th:nth-child(n + 2) { text-align: right; }
+            th:first-child, td:first-child { text-align: left; width: 16%; }
+            .total-row { font-weight: 700; background: #e2e8f0; }
+            .note { margin-top: 10px; font-size: 10px; color: #64748b; }
+            @media print {
+              body { padding: 0; }
+            }
           </style>
         </head>
         <body>
           <h1>${String(template.schoolName || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</h1>
-          <div class="muted">Class monthly fees â€” Shamsi month ${classMonthReport.month_shamsi}</div>
+          <div class="muted">Class fees — Shamsi month ${classMonthReport.month_shamsi} (landscape)</div>
           <table>
             <thead>${headerRow}</thead>
-            <tbody>${bodyRows}</tbody>
+            <tbody>${bodyRows}${footerRow}</tbody>
           </table>
           <p class="note">
-            Free students: students with 0 monthly and 0 transport fee (class defaults or overrides).
-            Remaining is per student max(expected âˆ’ paid, 0), summed for the class for this month only.
+            Monthly and transport are for this month only. Uniform is one-time (expected class/student fee, paid through this month).
+            Total fees = monthly + uniform + transport. Total paid = all three paid amounts.
           </p>
         </body>
       </html>
@@ -1133,7 +1197,7 @@ export default function Reports() {
             {activeTab === "summary"
               ? "Revenue, expenses, and profit with flexible date ranges."
               : activeTab === "classMonth"
-                ? "Per-class tuition and transport totals for one Shamsi month."
+                ? "Per-class monthly, uniform, and transport fees with paid amounts for one Shamsi month."
                 : activeTab === "studentStatement"
                   ? "A printable statement for one student, with payments, fees, and balances."
                   : activeTab === "expenseStatement"
@@ -1388,9 +1452,9 @@ export default function Reports() {
           <div className="panel">
             <h3>Class monthly fees</h3>
             <p className="muted-panel" style={{ marginBottom: 12 }}>
-              Select a Shamsi month (YYYY-MM). Each row is one class: student count, total expected monthly and
-              transport fees, amounts paid for that month (Monthly / Transport fee types), remaining balances, and
-              students with no monthly and no transport fee.
+              Select a Shamsi month (YYYY-MM). Columns are grouped: fee then paid for Monthly, Uniform, and Transport,
+              then Total fees and Total paid. Monthly/transport are for that month; uniform is one-time (paid through
+              that month).
             </p>
             <div className="form-grid">
               <Field label="Shamsi month (YYYY-MM)">
@@ -1408,17 +1472,19 @@ export default function Reports() {
 
           {classMonthReport?.classes?.length ? (
             <div className="panel" style={{ overflowX: "auto" }}>
-              <h3>Results â€” {classMonthReport.month_shamsi}</h3>
+              <h3>Results — {classMonthReport.month_shamsi}</h3>
               <div className="table">
                 <div className="table-head" style={classFeesGridStyle}>
                   <div>Class</div>
                   <div>Students</div>
                   <div>Monthly fees</div>
-                  <div>Transport fees</div>
                   <div>Monthly paid</div>
+                  <div>Uniform fees</div>
+                  <div>Uniform paid</div>
+                  <div>Transport fees</div>
                   <div>Transport paid</div>
-                  <div>Monthly left</div>
-                  <div>Transport left</div>
+                  <div>Total fees</div>
+                  <div>Total paid</div>
                   <div>Free</div>
                 </div>
                 {classMonthReport.classes.map((row) => (
@@ -1426,14 +1492,41 @@ export default function Reports() {
                     <div>{row.class_label}</div>
                     <div>{row.student_count}</div>
                     <div>{row.total_monthly_expected}</div>
-                    <div>{row.total_transport_expected}</div>
                     <div>{row.total_monthly_paid}</div>
+                    <div>{row.total_uniform_expected}</div>
+                    <div>{row.total_uniform_paid}</div>
+                    <div>{row.total_transport_expected}</div>
                     <div>{row.total_transport_paid}</div>
-                    <div>{row.total_monthly_remaining}</div>
-                    <div>{row.total_transport_remaining}</div>
+                    <div>
+                      <strong>{row.total_expected}</strong>
+                    </div>
+                    <div>
+                      <strong>{row.total_paid}</strong>
+                    </div>
                     <div>{row.free_students_count}</div>
                   </div>
                 ))}
+                <div
+                  className="table-row"
+                  style={{
+                    ...classFeesGridStyle,
+                    fontWeight: 700,
+                    background: "rgba(15, 23, 42, 0.04)",
+                    borderTop: "2px solid rgba(15, 23, 42, 0.12)",
+                  }}
+                >
+                  <div>TOTAL</div>
+                  <div>{classMonthTotals.student_count}</div>
+                  <div>{classMonthTotals.total_monthly_expected}</div>
+                  <div>{classMonthTotals.total_monthly_paid}</div>
+                  <div>{classMonthTotals.total_uniform_expected}</div>
+                  <div>{classMonthTotals.total_uniform_paid}</div>
+                  <div>{classMonthTotals.total_transport_expected}</div>
+                  <div>{classMonthTotals.total_transport_paid}</div>
+                  <div>{classMonthTotals.total_expected}</div>
+                  <div>{classMonthTotals.total_paid}</div>
+                  <div>{classMonthTotals.free_students_count}</div>
+                </div>
               </div>
             </div>
           ) : null}

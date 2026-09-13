@@ -583,10 +583,8 @@ class MonthlyDueFeesView(APIView):
 
 class ClassMonthlyFeesReportView(APIView):
     """
-    Per-class totals for one Shamsi month: expected fees, paid, remaining, student counts.
-
-    *free_students* counts students whose expected monthly and transport fees are both zero
-    (fee-exempt for this snapshot).
+    Per-class totals for one Shamsi month: monthly + transport for that month,
+    plus one-time uniform expected/paid (payments through the selected month).
     """
 
     def get(self, request):
@@ -622,6 +620,25 @@ class ClassMonthlyFeesReportView(APIView):
             )
 
         transport_fee_types = FeeType.objects.filter(name__icontains="transport")
+        uniform_fee_types = FeeType.objects.filter(name__icontains="uniform")
+
+        def empty_row(cls):
+            return {
+                "class_id": cls.id,
+                "class_name": cls.name,
+                "year_shamsi": cls.year_shamsi,
+                "class_label": f"{cls.name} ({cls.year_shamsi})",
+                "student_count": 0,
+                "total_monthly_expected": "0",
+                "total_monthly_paid": "0",
+                "total_uniform_expected": "0",
+                "total_uniform_paid": "0",
+                "total_transport_expected": "0",
+                "total_transport_paid": "0",
+                "total_expected": "0",
+                "total_paid": "0",
+                "free_students_count": 0,
+            }
 
         rows = []
         for cls in SchoolClass.objects.all().order_by("year_shamsi", "name"):
@@ -631,22 +648,7 @@ class ClassMonthlyFeesReportView(APIView):
             ]
             n = len(students)
             if n == 0:
-                rows.append(
-                    {
-                        "class_id": cls.id,
-                        "class_name": cls.name,
-                        "year_shamsi": cls.year_shamsi,
-                        "class_label": f"{cls.name} ({cls.year_shamsi})",
-                        "student_count": 0,
-                        "total_monthly_expected": "0",
-                        "total_transport_expected": "0",
-                        "total_monthly_paid": "0",
-                        "total_transport_paid": "0",
-                        "total_monthly_remaining": "0",
-                        "total_transport_remaining": "0",
-                        "free_students_count": 0,
-                    }
-                )
+                rows.append(empty_row(cls))
                 continue
 
             sids = [s.id for s in students]
@@ -670,33 +672,51 @@ class ClassMonthlyFeesReportView(APIView):
                 .values("student_id")
                 .annotate(paid=Sum("amount"))
             }
+            uniform_paid_map = {}
+            if uniform_fee_types.exists():
+                uniform_paid_map = {
+                    row["student_id"]: row["paid"]
+                    for row in Payment.objects.filter(
+                        student_id__in=sids,
+                        fee_type__in=uniform_fee_types,
+                        month_shamsi__lte=month_shamsi,
+                    )
+                    .values("student_id")
+                    .annotate(paid=Sum("amount"))
+                }
 
             total_m_exp = Decimal("0")
+            total_u_exp = Decimal("0")
             total_t_exp = Decimal("0")
             total_m_paid = Decimal("0")
+            total_u_paid = Decimal("0")
             total_t_paid = Decimal("0")
-            total_m_rem = Decimal("0")
-            total_t_rem = Decimal("0")
             free_students = 0
 
             for s in students:
                 exp_m = (
                     s.monthly_fee_override if s.monthly_fee_override is not None else cls.monthly_fee
                 )
+                exp_u = (
+                    s.uniform_fee_override if s.uniform_fee_override is not None else cls.uniform_fee
+                )
                 exp_t = (
                     s.transport_fee_override if s.transport_fee_override is not None else cls.transport_fee
                 )
                 paid_m = monthly_paid_map.get(s.id) or Decimal("0")
+                paid_u = uniform_paid_map.get(s.id) or Decimal("0")
                 paid_t = transport_paid_map.get(s.id) or Decimal("0")
                 total_m_exp += exp_m
+                total_u_exp += exp_u
                 total_t_exp += exp_t
                 total_m_paid += paid_m
+                total_u_paid += paid_u
                 total_t_paid += paid_t
-                total_m_rem += max(exp_m - paid_m, Decimal("0"))
-                total_t_rem += max(exp_t - paid_t, Decimal("0"))
                 if exp_m == 0 and exp_t == 0:
                     free_students += 1
 
+            total_exp = total_m_exp + total_u_exp + total_t_exp
+            total_paid = total_m_paid + total_u_paid + total_t_paid
             rows.append(
                 {
                     "class_id": cls.id,
@@ -705,11 +725,13 @@ class ClassMonthlyFeesReportView(APIView):
                     "class_label": f"{cls.name} ({cls.year_shamsi})",
                     "student_count": n,
                     "total_monthly_expected": str(total_m_exp),
-                    "total_transport_expected": str(total_t_exp),
                     "total_monthly_paid": str(total_m_paid),
+                    "total_uniform_expected": str(total_u_exp),
+                    "total_uniform_paid": str(total_u_paid),
+                    "total_transport_expected": str(total_t_exp),
                     "total_transport_paid": str(total_t_paid),
-                    "total_monthly_remaining": str(total_m_rem),
-                    "total_transport_remaining": str(total_t_rem),
+                    "total_expected": str(total_exp),
+                    "total_paid": str(total_paid),
                     "free_students_count": free_students,
                 }
             )
