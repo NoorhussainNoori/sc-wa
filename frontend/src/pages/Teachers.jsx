@@ -29,12 +29,24 @@ export default function Teachers() {
     next: null,
     previous: null,
   });
+  const [teacherSearch, setTeacherSearch] = useState("");
   const [form, setForm] = useState(emptyTeacher);
   const [editingTeacherId, setEditingTeacherId] = useState(null);
   const [error, setError] = useState("");
   const [loadingTeachers, setLoadingTeachers] = useState(false);
   const [savingTeacher, setSavingTeacher] = useState(false);
+
   const [selectedTeacher, setSelectedTeacher] = useState(null);
+  const [paymentTeacherSearch, setPaymentTeacherSearch] = useState("");
+  const [paymentTeachers, setPaymentTeachers] = useState([]);
+  const [paymentTeachersPage, setPaymentTeachersPage] = useState(1);
+  const [paymentTeachersMeta, setPaymentTeachersMeta] = useState({
+    count: 0,
+    next: null,
+    previous: null,
+  });
+  const [hasSearchedPaymentTeachers, setHasSearchedPaymentTeachers] = useState(false);
+  const [searchingPaymentTeachers, setSearchingPaymentTeachers] = useState(false);
   const [salaryPayments, setSalaryPayments] = useState([]);
   const [salaryPaymentsPage, setSalaryPaymentsPage] = useState(1);
   const [salaryPaymentsMeta, setSalaryPaymentsMeta] = useState({
@@ -46,13 +58,15 @@ export default function Teachers() {
   const [loadingSalaryPayments, setLoadingSalaryPayments] = useState(false);
   const [savingSalaryPayment, setSavingSalaryPayment] = useState(false);
 
-  const loadTeachers = async (page = 1) => {
+  const loadTeachers = async (query = teacherSearch, page = 1) => {
     setLoadingTeachers(true);
     try {
       const params = new URLSearchParams({
         page: String(page),
         page_size: String(PAGE_SIZE),
       });
+      const trimmed = String(query || "").trim();
+      if (trimmed) params.set("q", trimmed);
       const data = await apiFetch(`/teachers/?${params.toString()}`);
       setTeachers(extractListData(data));
       setTeachersMeta(extractPaginationMeta(data));
@@ -61,6 +75,28 @@ export default function Teachers() {
       setError(err.message || "Failed to load teachers.");
     } finally {
       setLoadingTeachers(false);
+    }
+  };
+
+  const searchPaymentTeachers = async (page = 1) => {
+    setError("");
+    setSearchingPaymentTeachers(true);
+    setHasSearchedPaymentTeachers(true);
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        page_size: String(PAGE_SIZE),
+      });
+      const trimmed = String(paymentTeacherSearch || "").trim();
+      if (trimmed) params.set("q", trimmed);
+      const data = await apiFetch(`/teachers/?${params.toString()}`);
+      setPaymentTeachers(extractListData(data));
+      setPaymentTeachersMeta(extractPaginationMeta(data));
+      setPaymentTeachersPage(page);
+    } catch (err) {
+      setError(err.message || "Failed to search teachers.");
+    } finally {
+      setSearchingPaymentTeachers(false);
     }
   };
 
@@ -85,7 +121,7 @@ export default function Teachers() {
   };
 
   useEffect(() => {
-    void loadTeachers(1);
+    void loadTeachers("", 1);
   }, []);
 
   const onChange = (field) => (event) => {
@@ -103,7 +139,10 @@ export default function Teachers() {
       });
       setForm(emptyTeacher);
       setEditingTeacherId(null);
-      await loadTeachers(teachersPage);
+      await loadTeachers(teacherSearch, teachersPage);
+      if (hasSearchedPaymentTeachers) {
+        await searchPaymentTeachers(paymentTeachersPage);
+      }
     } catch (err) {
       setError(err.message || `Failed to ${editingTeacherId ? "update" : "create"} teacher.`);
     } finally {
@@ -135,23 +174,33 @@ export default function Teachers() {
         setForm(emptyTeacher);
       }
       if (selectedTeacher?.id === teacher.id) {
-        setSelectedTeacher(null);
-        setSalaryPayments([]);
-        setSalaryPaymentForm(emptySalaryPayment);
+        clearSelectedTeacher();
       }
-      await loadTeachers(teachersPage);
+      await loadTeachers(teacherSearch, teachersPage);
+      if (hasSearchedPaymentTeachers) {
+        await searchPaymentTeachers(paymentTeachersPage);
+      }
     } catch (err) {
       setError(err.message || "Failed to delete teacher.");
     }
   };
 
-  const onSelectTeacher = (teacher) => {
+  const clearSelectedTeacher = () => {
+    setSelectedTeacher(null);
+    setSalaryPayments([]);
+    setSalaryPaymentsMeta({ count: 0, next: null, previous: null });
+    setSalaryPaymentsPage(1);
+    setSalaryPaymentForm(emptySalaryPayment);
+  };
+
+  const onSelectTeacherForPayment = (teacher) => {
     setSelectedTeacher(teacher);
     setSalaryPaymentForm({
       date_shamsi: "",
       amount: teacher.salary || "",
       notes: "",
     });
+    setError("");
     void loadSalaryPayments(teacher.id, 1);
   };
 
@@ -186,7 +235,7 @@ export default function Teachers() {
         amount: selectedTeacher.salary || "",
         notes: "",
       });
-      await loadSalaryPayments(selectedTeacher.id, salaryPaymentsPage);
+      await loadSalaryPayments(selectedTeacher.id, 1);
     } catch (err) {
       setError(err.message || "Failed to save salary payment.");
     } finally {
@@ -201,8 +250,8 @@ export default function Teachers() {
           <h2>Teachers</h2>
           <p>
             {activeTab === "teachers"
-              ? "Register teachers and set their salary."
-              : "Record monthly teacher salary payments."}
+              ? "Register teachers and set their salary. Search and page through the list."
+              : "Search a teacher, select them, then record salary payments."}
           </p>
         </div>
       </div>
@@ -218,7 +267,10 @@ export default function Teachers() {
         <button
           className={activeTab === "payments" ? "button button-primary" : "button button-outline"}
           type="button"
-          onClick={() => setActiveTab("payments")}
+          onClick={() => {
+            setActiveTab("payments");
+            setError("");
+          }}
         >
           Teacher payments
         </button>
@@ -266,12 +318,46 @@ export default function Teachers() {
                 </button>
               ) : null}
             </form>
-            {loadingTeachers ? <div className="status-message">Loading teachers...</div> : null}
             {error ? <div className="form-error">{error}</div> : null}
           </div>
 
           <div className="panel">
             <h3>Teacher List</h3>
+            <div className="inline-actions" style={{ marginBottom: 12 }}>
+              <input
+                className="input"
+                value={teacherSearch}
+                onChange={(event) => setTeacherSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void loadTeachers(teacherSearch, 1);
+                  }
+                }}
+                placeholder="Search name, father, phone, email, department..."
+              />
+              <button
+                className="button button-outline"
+                type="button"
+                onClick={() => loadTeachers(teacherSearch, 1)}
+                disabled={loadingTeachers}
+              >
+                {loadingTeachers ? "Searching..." : "Search"}
+              </button>
+              {teacherSearch ? (
+                <button
+                  className="button button-outline"
+                  type="button"
+                  onClick={() => {
+                    setTeacherSearch("");
+                    void loadTeachers("", 1);
+                  }}
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
+            {loadingTeachers ? <div className="status-message">Loading teachers...</div> : null}
             <div className="table">
               <div className="table-head">
                 <div>ID</div>
@@ -305,7 +391,7 @@ export default function Teachers() {
             </div>
             {!loadingTeachers && teachers.length === 0 ? (
               <div className="muted-panel" style={{ marginTop: 12 }}>
-                No data found.
+                No teachers found.
               </div>
             ) : null}
             <PaginationControls
@@ -314,104 +400,192 @@ export default function Teachers() {
               pageSize={PAGE_SIZE}
               hasPrevious={Boolean(teachersMeta.previous)}
               hasNext={Boolean(teachersMeta.next)}
-              onPrevious={() => loadTeachers(Math.max(1, teachersPage - 1))}
-              onNext={() => loadTeachers(teachersPage + 1)}
+              onPrevious={() => loadTeachers(teacherSearch, Math.max(1, teachersPage - 1))}
+              onNext={() => loadTeachers(teacherSearch, teachersPage + 1)}
             />
           </div>
         </>
       ) : null}
 
       {activeTab === "payments" ? (
-        <div className="panel">
-          <h3>Salary Payments</h3>
-          <p className="muted-panel" style={{ marginBottom: 12 }}>
-            Select a teacher, then record monthly salary payments against the teacher salary you set above. Salary
-            payments stop at Shamsi month 09.
-          </p>
-          <div className="pill-list" style={{ marginBottom: 12 }}>
-            {teachers.map((teacher) => (
+        <>
+          <div className="panel">
+            <h3>1. Find Teacher</h3>
+            <div className="inline-actions">
+              <input
+                className="input"
+                value={paymentTeacherSearch}
+                onChange={(event) => setPaymentTeacherSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void searchPaymentTeachers(1);
+                  }
+                }}
+                placeholder="Search name, father, phone, email, department..."
+              />
               <button
-                key={`teacher-select-${teacher.id}`}
-                className={`pill ${selectedTeacher?.id === teacher.id ? "pill-active" : ""}`}
+                className="button button-outline"
                 type="button"
-                onClick={() => onSelectTeacher(teacher)}
+                onClick={() => searchPaymentTeachers(1)}
+                disabled={searchingPaymentTeachers}
               >
-                {teacher.name} - {teacher.department}
+                {searchingPaymentTeachers ? "Searching..." : "Search"}
               </button>
-            ))}
-          </div>
-          <form className="form-grid" onSubmit={onSalaryPaymentSubmit}>
-            <Field label="Selected Teacher">
-              <input
-                className="input"
-                value={selectedTeacher ? `${selectedTeacher.name} (${selectedTeacher.department})` : ""}
-                readOnly
-                placeholder="Select a teacher above"
-              />
-            </Field>
-            <Field label="Date (Shamsi YYYY-MM-DD)">
-              <input
-                className="input"
-                value={salaryPaymentForm.date_shamsi}
-                onChange={onSalaryPaymentChange("date_shamsi")}
-                placeholder="1404-01-30"
-              />
-            </Field>
-            <Field label="Amount">
-              <input
-                className="input"
-                value={salaryPaymentForm.amount}
-                onChange={onSalaryPaymentChange("amount")}
-                placeholder={selectedTeacher?.salary || "Teacher salary"}
-              />
-            </Field>
-            <Field label="Notes">
-              <input
-                className="input"
-                value={salaryPaymentForm.notes}
-                onChange={onSalaryPaymentChange("notes")}
-                placeholder="Optional notes"
-              />
-            </Field>
-            <button className="button button-primary" type="submit" disabled={savingSalaryPayment}>
-              {savingSalaryPayment ? "Saving..." : "Save Salary Payment"}
-            </button>
-          </form>
-          {loadingSalaryPayments ? <div className="status-message">Loading salary payments...</div> : null}
-          {error ? <div className="form-error">{error}</div> : null}
-          <div className="table" style={{ marginTop: 12 }}>
-            <div className="table-head">
-              <div>ID</div>
-              <div>Date</div>
-              <div>Amount</div>
-              <div>Notes</div>
             </div>
-            {salaryPayments.map((payment) => (
-              <div className="table-row" key={payment.id}>
-                <div>{payment.id}</div>
-                <div>{payment.date_shamsi}</div>
-                <div>{payment.amount}</div>
-                <div>{payment.notes || "—"}</div>
+
+            {selectedTeacher ? (
+              <div className="muted-panel" style={{ marginTop: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                  <div>
+                    <strong>Selected:</strong> {selectedTeacher.name} — {selectedTeacher.department}
+                    <div style={{ marginTop: 4 }}>
+                      Father: {selectedTeacher.father_name} · Phone: {selectedTeacher.phone} · Salary:{" "}
+                      {selectedTeacher.salary}
+                    </div>
+                  </div>
+                  <button className="button button-outline" type="button" onClick={clearSelectedTeacher}>
+                    Change teacher
+                  </button>
+                </div>
               </div>
-            ))}
+            ) : null}
+
+            {!selectedTeacher ? (
+              <>
+                <div className="pill-list" style={{ marginTop: 12 }}>
+                  {paymentTeachers.map((teacher) => (
+                    <button
+                      key={teacher.id}
+                      className="pill"
+                      type="button"
+                      onClick={() => onSelectTeacherForPayment(teacher)}
+                    >
+                      {teacher.name} — {teacher.department} ({teacher.salary})
+                    </button>
+                  ))}
+                </div>
+                {searchingPaymentTeachers ? (
+                  <div className="status-message" style={{ marginTop: 12 }}>
+                    Searching teachers...
+                  </div>
+                ) : null}
+                {!searchingPaymentTeachers && hasSearchedPaymentTeachers && paymentTeachers.length === 0 ? (
+                  <div className="muted-panel" style={{ marginTop: 12 }}>
+                    No teachers found. Try another search.
+                  </div>
+                ) : null}
+                {!hasSearchedPaymentTeachers ? (
+                  <div className="muted-panel" style={{ marginTop: 12 }}>
+                    Search for a teacher, then click their name to select them.
+                  </div>
+                ) : null}
+                {hasSearchedPaymentTeachers ? (
+                  <PaginationControls
+                    count={paymentTeachersMeta.count}
+                    currentPage={paymentTeachersPage}
+                    pageSize={PAGE_SIZE}
+                    hasPrevious={Boolean(paymentTeachersMeta.previous)}
+                    hasNext={Boolean(paymentTeachersMeta.next)}
+                    onPrevious={() => searchPaymentTeachers(Math.max(1, paymentTeachersPage - 1))}
+                    onNext={() => searchPaymentTeachers(paymentTeachersPage + 1)}
+                  />
+                ) : null}
+              </>
+            ) : null}
           </div>
-          {!loadingSalaryPayments && selectedTeacher && salaryPayments.length === 0 ? (
-            <div className="muted-panel" style={{ marginTop: 12 }}>
-              No salary payments found for this teacher.
-            </div>
-          ) : null}
-          <PaginationControls
-            count={salaryPaymentsMeta.count}
-            currentPage={salaryPaymentsPage}
-            pageSize={PAGE_SIZE}
-            hasPrevious={Boolean(salaryPaymentsMeta.previous)}
-            hasNext={Boolean(salaryPaymentsMeta.next)}
-            onPrevious={() =>
-              selectedTeacher ? loadSalaryPayments(selectedTeacher.id, Math.max(1, salaryPaymentsPage - 1)) : null
-            }
-            onNext={() => (selectedTeacher ? loadSalaryPayments(selectedTeacher.id, salaryPaymentsPage + 1) : null)}
-          />
-        </div>
+
+          <div className="panel">
+            <h3>2. Record Salary Payment</h3>
+            {!selectedTeacher ? (
+              <div className="muted-panel">Select a teacher above to record a payment.</div>
+            ) : (
+              <form className="form-grid" onSubmit={onSalaryPaymentSubmit}>
+                <Field label="Teacher">
+                  <input
+                    className="input"
+                    value={`${selectedTeacher.name} (${selectedTeacher.department})`}
+                    readOnly
+                  />
+                </Field>
+                <Field label="Date (Shamsi YYYY-MM-DD)">
+                  <input
+                    className="input"
+                    value={salaryPaymentForm.date_shamsi}
+                    onChange={onSalaryPaymentChange("date_shamsi")}
+                    placeholder="1404-01-30"
+                    required
+                  />
+                </Field>
+                <Field label="Amount">
+                  <input
+                    className="input"
+                    value={salaryPaymentForm.amount}
+                    onChange={onSalaryPaymentChange("amount")}
+                    placeholder={String(selectedTeacher.salary || "")}
+                    required
+                  />
+                </Field>
+                <Field label="Notes">
+                  <input
+                    className="input"
+                    value={salaryPaymentForm.notes}
+                    onChange={onSalaryPaymentChange("notes")}
+                    placeholder="Optional notes"
+                  />
+                </Field>
+                <button className="button button-primary" type="submit" disabled={savingSalaryPayment}>
+                  {savingSalaryPayment ? "Saving..." : "Save Salary Payment"}
+                </button>
+              </form>
+            )}
+            {error ? <div className="form-error">{error}</div> : null}
+            <p className="muted-panel" style={{ marginTop: 12 }}>
+              Salary payments are only allowed up to Shamsi month 09.
+            </p>
+          </div>
+
+          <div className="panel">
+            <h3>3. Payment History</h3>
+            {!selectedTeacher ? (
+              <div className="muted-panel">Payment history appears after you select a teacher.</div>
+            ) : (
+              <>
+                {loadingSalaryPayments ? <div className="status-message">Loading salary payments...</div> : null}
+                <div className="table">
+                  <div className="table-head">
+                    <div>ID</div>
+                    <div>Date</div>
+                    <div>Amount</div>
+                    <div>Notes</div>
+                  </div>
+                  {salaryPayments.map((payment) => (
+                    <div className="table-row" key={payment.id}>
+                      <div>{payment.id}</div>
+                      <div>{payment.date_shamsi}</div>
+                      <div>{payment.amount}</div>
+                      <div>{payment.notes || "—"}</div>
+                    </div>
+                  ))}
+                </div>
+                {!loadingSalaryPayments && salaryPayments.length === 0 ? (
+                  <div className="muted-panel" style={{ marginTop: 12 }}>
+                    No salary payments found for this teacher.
+                  </div>
+                ) : null}
+                <PaginationControls
+                  count={salaryPaymentsMeta.count}
+                  currentPage={salaryPaymentsPage}
+                  pageSize={PAGE_SIZE}
+                  hasPrevious={Boolean(salaryPaymentsMeta.previous)}
+                  hasNext={Boolean(salaryPaymentsMeta.next)}
+                  onPrevious={() => loadSalaryPayments(selectedTeacher.id, Math.max(1, salaryPaymentsPage - 1))}
+                  onNext={() => loadSalaryPayments(selectedTeacher.id, salaryPaymentsPage + 1)}
+                />
+              </>
+            )}
+          </div>
+        </>
       ) : null}
     </div>
   );
