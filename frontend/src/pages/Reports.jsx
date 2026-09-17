@@ -70,6 +70,19 @@ export default function Reports() {
   const [teacherSalaryError, setTeacherSalaryError] = useState("");
   const [loadingTeacherSalaryList, setLoadingTeacherSalaryList] = useState(false);
   const [exportingTeacherSalaryExcel, setExportingTeacherSalaryExcel] = useState(false);
+  const [studentPaymentYear, setStudentPaymentYear] = useState("");
+  const [studentPaymentClassId, setStudentPaymentClassId] = useState("");
+  const [studentPaymentCategories, setStudentPaymentCategories] = useState({
+    monthly: true,
+    transport: true,
+    uniform: true,
+    book: true,
+  });
+  const [studentPaymentList, setStudentPaymentList] = useState(null);
+  const [studentPaymentError, setStudentPaymentError] = useState("");
+  const [loadingStudentPaymentList, setLoadingStudentPaymentList] = useState(false);
+  const [exportingStudentPaymentExcel, setExportingStudentPaymentExcel] = useState(false);
+  const [reportClasses, setReportClasses] = useState([]);
   const [expenseCategories, setExpenseCategories] = useState([]);
   const [selectedExpenseCategoryId, setSelectedExpenseCategoryId] = useState("");
   const [expenseStatementStart, setExpenseStatementStart] = useState("");
@@ -263,6 +276,41 @@ export default function Reports() {
       setTeacherSalaryList(null);
     } finally {
       setLoadingTeacherSalaryList(false);
+    }
+  };
+
+  const loadReportClasses = async () => {
+    try {
+      const data = await apiFetch("/classes/?page_size=200");
+      setReportClasses(extractListData(data));
+    } catch (err) {
+      setStudentPaymentError(err.message || "Failed to load classes.");
+    }
+  };
+
+  const loadStudentPaymentList = async () => {
+    const selected = Object.entries(studentPaymentCategories)
+      .filter(([, enabled]) => enabled)
+      .map(([key]) => key);
+    if (!selected.length) {
+      setStudentPaymentError("Select at least one fee category.");
+      return;
+    }
+    setStudentPaymentError("");
+    setLoadingStudentPaymentList(true);
+    try {
+      const params = new URLSearchParams();
+      const year = String(studentPaymentYear || "").trim();
+      if (year) params.set("year_shamsi", year);
+      if (studentPaymentClassId) params.set("class_id", String(studentPaymentClassId));
+      params.set("categories", selected.join(","));
+      const data = await apiFetch(`/reports/student-payment-list/?${params.toString()}`);
+      setStudentPaymentList(data);
+    } catch (err) {
+      setStudentPaymentError(err.message || "Failed to load student payment list.");
+      setStudentPaymentList(null);
+    } finally {
+      setLoadingStudentPaymentList(false);
     }
   };
 
@@ -1146,6 +1194,312 @@ export default function Reports() {
     reportWindow.print();
   };
 
+  const exportStudentPaymentListExcel = async () => {
+    if (!studentPaymentList) return;
+    setExportingStudentPaymentExcel(true);
+    try {
+      const ExcelJS = (await import("exceljs")).default;
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = template.schoolName || "School Finance";
+      const sheet = workbook.addWorksheet("پرداخت شاگردان", {
+        views: [{ rightToLeft: true, state: "frozen", xSplit: 5, ySplit: 3 }],
+      });
+
+      const thinBorder = {
+        top: { style: "thin", color: { argb: "FF334155" } },
+        left: { style: "thin", color: { argb: "FF334155" } },
+        bottom: { style: "thin", color: { argb: "FF334155" } },
+        right: { style: "thin", color: { argb: "FF334155" } },
+      };
+      const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE2E8F0" } };
+      const titleFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDBEAFE" } };
+      const totalFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } };
+
+      const categories = studentPaymentList.categories || [];
+      const monthLabels = studentPaymentList.month_labels || [];
+      const catCount = categories.length;
+      const totalCols = 5 + monthLabels.length * (catCount + 1) + catCount + 1;
+
+      for (let i = 1; i <= totalCols; i += 1) {
+        sheet.getColumn(i).width = i <= 5 ? 14 : 11;
+      }
+      sheet.getColumn(1).width = 8;
+      sheet.getColumn(2).width = 16;
+
+      sheet.mergeCells(1, 1, 1, Math.max(totalCols, 6));
+      const title = sheet.getCell(1, 1);
+      title.value = `لیست پرداخت‌های شاگردان ${template.schoolName || ""} سال ${studentPaymentList.year_shamsi}`;
+      title.font = { bold: true, size: 13 };
+      title.alignment = { horizontal: "center", vertical: "middle" };
+      title.fill = titleFill;
+      sheet.getRow(1).height = 24;
+
+      const fixedHeaders = ["شماره", "اسم", "نمبر ثبت", "ولد", "صنف"];
+      fixedHeaders.forEach((label, idx) => {
+        sheet.mergeCells(2, idx + 1, 3, idx + 1);
+        const cell = sheet.getCell(2, idx + 1);
+        cell.value = label;
+        cell.font = { bold: true };
+        cell.fill = headerFill;
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+      });
+
+      let col = 6;
+      monthLabels.forEach((month) => {
+        const span = catCount + 1;
+        sheet.mergeCells(2, col, 2, col + span - 1);
+        const monthCell = sheet.getCell(2, col);
+        monthCell.value = month.label;
+        monthCell.font = { bold: true };
+        monthCell.fill = headerFill;
+        monthCell.alignment = { horizontal: "center", vertical: "middle" };
+        categories.forEach((category, index) => {
+          const cell = sheet.getCell(3, col + index);
+          cell.value = category.label;
+          cell.font = { bold: true };
+          cell.fill = headerFill;
+        });
+        const totalCell = sheet.getCell(3, col + catCount);
+        totalCell.value = "جمع ماه";
+        totalCell.font = { bold: true };
+        totalCell.fill = headerFill;
+        col += span;
+      });
+
+      categories.forEach((category, index) => {
+        sheet.mergeCells(2, col + index, 3, col + index);
+        const cell = sheet.getCell(2, col + index);
+        cell.value = `مجموعه ${category.label}`;
+        cell.font = { bold: true };
+        cell.fill = headerFill;
+        cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      });
+      sheet.mergeCells(2, col + catCount, 3, col + catCount);
+      const subtotalHeader = sheet.getCell(2, col + catCount);
+      subtotalHeader.value = "مجموعه شاگرد";
+      subtotalHeader.font = { bold: true };
+      subtotalHeader.fill = headerFill;
+      subtotalHeader.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+
+      for (let r = 2; r <= 3; r += 1) {
+        for (let c = 1; c <= totalCols; c += 1) {
+          sheet.getCell(r, c).border = thinBorder;
+          sheet.getCell(r, c).alignment = {
+            horizontal: "center",
+            vertical: "middle",
+            wrapText: true,
+          };
+        }
+      }
+
+      let rowNum = 4;
+      (studentPaymentList.rows || []).forEach((row) => {
+        sheet.getCell(rowNum, 1).value = row.row_number;
+        sheet.getCell(rowNum, 2).value = row.name || "";
+        sheet.getCell(rowNum, 3).value = row.registration_number || "";
+        sheet.getCell(rowNum, 4).value = row.father_name || "";
+        sheet.getCell(rowNum, 5).value = row.class_name || "";
+        let c = 6;
+        (row.months || []).forEach((month) => {
+          categories.forEach((category) => {
+            const display = month.displays?.[category.key];
+            const raw = month.amounts?.[category.key];
+            const num = Number(raw);
+            sheet.getCell(rowNum, c).value = display === "//" ? "//" : Number.isFinite(num) ? num : display || "//";
+            if (display !== "//" && Number.isFinite(num)) {
+              sheet.getCell(rowNum, c).numFmt = "#,##0.00";
+            }
+            c += 1;
+          });
+          const monthTotalNum = Number(month.month_total);
+          sheet.getCell(rowNum, c).value =
+            month.month_total === "//"
+              ? "//"
+              : Number.isFinite(monthTotalNum)
+                ? monthTotalNum
+                : month.month_total;
+          if (month.month_total !== "//" && Number.isFinite(monthTotalNum)) {
+            sheet.getCell(rowNum, c).numFmt = "#,##0.00";
+          }
+          c += 1;
+        });
+        categories.forEach((category) => {
+          const num = Number(row.category_totals?.[category.key] || 0);
+          sheet.getCell(rowNum, c).value = num;
+          sheet.getCell(rowNum, c).numFmt = "#,##0.00";
+          c += 1;
+        });
+        const subtotalNum = Number(row.subtotal || 0);
+        sheet.getCell(rowNum, c).value = subtotalNum;
+        sheet.getCell(rowNum, c).numFmt = "#,##0.00";
+
+        for (let i = 1; i <= totalCols; i += 1) {
+          sheet.getCell(rowNum, i).border = thinBorder;
+          sheet.getCell(rowNum, i).alignment = { horizontal: "center", vertical: "middle" };
+        }
+        sheet.getCell(rowNum, 2).alignment = { horizontal: "right", vertical: "middle" };
+        sheet.getCell(rowNum, 4).alignment = { horizontal: "right", vertical: "middle" };
+        sheet.getCell(rowNum, 5).alignment = { horizontal: "right", vertical: "middle" };
+        rowNum += 1;
+      });
+
+      sheet.mergeCells(rowNum, 1, rowNum, 5);
+      sheet.getCell(rowNum, 1).value = "مجموعه نهایی";
+      let footerCol = 6;
+      (studentPaymentList.summary?.month_totals || []).forEach((month) => {
+        categories.forEach((category) => {
+          const num = Number(month.amounts?.[category.key] || 0);
+          sheet.getCell(rowNum, footerCol).value = num;
+          sheet.getCell(rowNum, footerCol).numFmt = "#,##0.00";
+          footerCol += 1;
+        });
+        const monthTotalNum = Number(month.month_total || 0);
+        sheet.getCell(rowNum, footerCol).value = monthTotalNum;
+        sheet.getCell(rowNum, footerCol).numFmt = "#,##0.00";
+        footerCol += 1;
+      });
+      categories.forEach((category) => {
+        const num = Number(studentPaymentList.summary?.category_totals?.[category.key] || 0);
+        sheet.getCell(rowNum, footerCol).value = num;
+        sheet.getCell(rowNum, footerCol).numFmt = "#,##0.00";
+        footerCol += 1;
+      });
+      sheet.getCell(rowNum, footerCol).value = Number(studentPaymentList.summary?.grand_total || 0);
+      sheet.getCell(rowNum, footerCol).numFmt = "#,##0.00";
+      for (let i = 1; i <= totalCols; i += 1) {
+        sheet.getCell(rowNum, i).border = thinBorder;
+        sheet.getCell(rowNum, i).font = { bold: true };
+        sheet.getCell(rowNum, i).fill = totalFill;
+        sheet.getCell(rowNum, i).alignment = { horizontal: "center", vertical: "middle" };
+      }
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `student_payment_list_${studentPaymentList.year_shamsi}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setStudentPaymentError(err.message || "Failed to export Excel file.");
+    } finally {
+      setExportingStudentPaymentExcel(false);
+    }
+  };
+
+  const printStudentPaymentList = () => {
+    if (!studentPaymentList) return;
+    const reportWindow = window.open("", "_blank", "width=1400,height=900");
+    if (!reportWindow) return;
+    const categories = studentPaymentList.categories || [];
+    const monthLabels = studentPaymentList.month_labels || [];
+    const headMonths = monthLabels
+      .map((month) => `<th colspan="${categories.length + 1}">${escapeHtml(month.label)}</th>`)
+      .join("");
+    const subHeadMonths = monthLabels
+      .map(
+        () =>
+          `${categories.map((category) => `<th>${escapeHtml(category.label)}</th>`).join("")}<th>جمع ماه</th>`
+      )
+      .join("");
+    const categoryTotalHeads = categories
+      .map((category) => `<th rowspan="2">مجموعه ${escapeHtml(category.label)}</th>`)
+      .join("");
+    const bodyRows = (studentPaymentList.rows || [])
+      .map((row) => {
+        const months = (row.months || [])
+          .map((month) => {
+            const cats = categories
+              .map((category) => `<td>${escapeHtml(month.displays?.[category.key] || "//")}</td>`)
+              .join("");
+            return `${cats}<td>${escapeHtml(month.month_total)}</td>`;
+          })
+          .join("");
+        const catTotals = categories
+          .map((category) => `<td>${escapeHtml(row.category_totals?.[category.key] || "0.00")}</td>`)
+          .join("");
+        return `<tr>
+          <td>${escapeHtml(row.row_number)}</td>
+          <td class="name">${escapeHtml(row.name)}</td>
+          <td>${escapeHtml(row.registration_number)}</td>
+          <td class="name">${escapeHtml(row.father_name)}</td>
+          <td class="name">${escapeHtml(row.class_name)}</td>
+          ${months}
+          ${catTotals}
+          <td>${escapeHtml(row.subtotal)}</td>
+        </tr>`;
+      })
+      .join("");
+    const footerMonths = (studentPaymentList.summary?.month_totals || [])
+      .map((month) => {
+        const cats = categories
+          .map((category) => `<td>${escapeHtml(month.amounts?.[category.key] || "0.00")}</td>`)
+          .join("");
+        return `${cats}<td>${escapeHtml(month.month_total)}</td>`;
+      })
+      .join("");
+    const footerCats = categories
+      .map(
+        (category) =>
+          `<td>${escapeHtml(studentPaymentList.summary?.category_totals?.[category.key] || "0.00")}</td>`
+      )
+      .join("");
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>لیست پرداخت شاگردان</title>
+          <style>
+            @page { size: A4 landscape; margin: 8mm; }
+            body { font-family: Tahoma, "Segoe UI", sans-serif; direction: rtl; color: #0f172a; }
+            h1 { margin: 0 0 10px; font-size: 1.05rem; text-align: center; }
+            table { width: 100%; border-collapse: collapse; font-size: 8px; }
+            th, td { border: 1px solid #334155; padding: 2px 3px; text-align: center; }
+            th { background: #e2e8f0; }
+            td.name { text-align: right; }
+            tfoot td { background: #f1f5f9; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h1>لیست پرداخت‌های شاگردان ${escapeHtml(template.schoolName || "")} سال ${escapeHtml(studentPaymentList.year_shamsi)}</h1>
+          <table>
+            <thead>
+              <tr>
+                <th rowspan="2">شماره</th>
+                <th rowspan="2">اسم</th>
+                <th rowspan="2">نمبر ثبت</th>
+                <th rowspan="2">ولد</th>
+                <th rowspan="2">صنف</th>
+                ${headMonths}
+                ${categoryTotalHeads}
+                <th rowspan="2">مجموعه شاگرد</th>
+              </tr>
+              <tr>${subHeadMonths}</tr>
+            </thead>
+            <tbody>${bodyRows || '<tr><td colspan="20">موردی یافت نشد</td></tr>'}</tbody>
+            <tfoot>
+              <tr>
+                <td colspan="5">مجموعه نهایی</td>
+                ${footerMonths}
+                ${footerCats}
+                <td>${escapeHtml(studentPaymentList.summary?.grand_total || "0.00")}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </body>
+      </html>
+    `;
+    reportWindow.document.write(html);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
+  };
+
   const exportExpenseStatementExcel = async () => {
     if (!expenseStatement) return;
     setExportingExpenseExcel(true);
@@ -1642,6 +1996,8 @@ export default function Reports() {
                     ? "A printable salary statement for one teacher, with monthly salary payouts and balance."
                   : activeTab === "teacherSalaryList"
                     ? "Excel-style staff salary matrix for the year: months, 2% tax, and totals."
+                  : activeTab === "studentPaymentList"
+                    ? "Excel-style student payments by month for selected fee types, with student and grand totals."
                   : "Receipt appearance for printed bills."}
           </p>
         </div>
@@ -1672,6 +2028,14 @@ export default function Reports() {
             disabled={loadingTeacherSalaryList}
           >
             {loadingTeacherSalaryList ? "Generating..." : "Generate Report"}
+          </button>
+        ) : activeTab === "studentPaymentList" ? (
+          <button
+            className="button button-primary"
+            onClick={loadStudentPaymentList}
+            disabled={loadingStudentPaymentList}
+          >
+            {loadingStudentPaymentList ? "Generating..." : "Generate Report"}
           </button>
         ) : (
           <button className="button button-primary" onClick={saveTemplate} disabled={savingTemplate}>
@@ -1727,6 +2091,18 @@ export default function Reports() {
           onClick={() => setActiveTab("teacherSalaryList")}
         >
           Teacher salary list
+        </button>
+        <button
+          className={activeTab === "studentPaymentList" ? "button button-primary" : "button button-outline"}
+          type="button"
+          onClick={() => {
+            setActiveTab("studentPaymentList");
+            if (!reportClasses.length) {
+              void loadReportClasses();
+            }
+          }}
+        >
+          Student payment list
         </button>
         <button
           className={activeTab === "template" ? "button button-primary" : "button button-outline"}
@@ -1808,6 +2184,22 @@ export default function Reports() {
             {exportingTeacherSalaryExcel ? "Exporting..." : "Export Excel"}
           </button>
           <button className="button button-outline" type="button" onClick={printTeacherSalaryList}>
+            Print
+          </button>
+        </div>
+      ) : null}
+
+      {activeTab === "studentPaymentList" && studentPaymentList ? (
+        <div className="inline-actions">
+          <button
+            className="button button-outline"
+            type="button"
+            onClick={exportStudentPaymentListExcel}
+            disabled={exportingStudentPaymentExcel}
+          >
+            {exportingStudentPaymentExcel ? "Exporting..." : "Export Excel"}
+          </button>
+          <button className="button button-outline" type="button" onClick={printStudentPaymentList}>
             Print
           </button>
         </div>
@@ -2670,6 +3062,176 @@ export default function Reports() {
                 {!teacherSalaryList.rows?.length ? (
                   <div className="muted-panel" style={{ marginTop: 12 }}>
                     No teachers found.
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : null}
+        </>
+      ) : null}
+
+      {activeTab === "studentPaymentList" ? (
+        <>
+          <div className="panel">
+            <h3>Student payment list options</h3>
+            <p className="muted-panel" style={{ marginBottom: 12 }}>
+              Choose fee types (monthly, transport, uniform, book). The report shows each month from Hamal to Hoot,
+              amounts per selected type, student subtotal, and a final grand total. Empty months show <strong>//</strong>.
+            </p>
+            <div className="form-grid">
+              <Field label="Shamsi Year (YYYY, optional)">
+                <input
+                  className="input"
+                  value={studentPaymentYear}
+                  onChange={(event) => setStudentPaymentYear(event.target.value)}
+                  placeholder="1404"
+                />
+              </Field>
+              <Field label="Class (optional)">
+                <select
+                  className="input"
+                  value={studentPaymentClassId}
+                  onChange={(event) => setStudentPaymentClassId(event.target.value)}
+                >
+                  <option value="">All classes</option>
+                  {reportClasses.map((schoolClass) => (
+                    <option key={schoolClass.id} value={schoolClass.id}>
+                      {schoolClass.name} ({schoolClass.year_shamsi})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <div className="muted-panel" style={{ marginBottom: 8 }}>
+                Fee categories
+              </div>
+              <div className="category-checkboxes">
+                {[
+                  ["monthly", "Monthly fees"],
+                  ["transport", "Transport"],
+                  ["uniform", "Uniform"],
+                  ["book", "Book"],
+                ].map(([key, label]) => (
+                  <label key={key}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(studentPaymentCategories[key])}
+                      onChange={(event) =>
+                        setStudentPaymentCategories((prev) => ({
+                          ...prev,
+                          [key]: event.target.checked,
+                        }))
+                      }
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+            {loadingStudentPaymentList ? <div className="status-message">Generating payment list...</div> : null}
+            {studentPaymentError ? <div className="form-error">{studentPaymentError}</div> : null}
+          </div>
+
+          {studentPaymentList ? (
+            <>
+              <div className="stats-grid">
+                <StatCard label="Year" value={studentPaymentList.year_shamsi || "—"} />
+                <StatCard label="Students" value={studentPaymentList.summary?.students_count || "—"} />
+                <StatCard label="Grand Total" value={studentPaymentList.summary?.grand_total || "—"} />
+                <StatCard
+                  label="Categories"
+                  value={(studentPaymentList.categories || []).map((item) => item.label).join("، ") || "—"}
+                />
+              </div>
+
+              <div className="panel">
+                <h3>لیست پرداخت‌های شاگردان — سال {studentPaymentList.year_shamsi}</h3>
+                <div className="salary-sheet-wrap">
+                  <table className="salary-sheet">
+                    <thead>
+                      <tr>
+                        <th rowSpan={2}>شماره</th>
+                        <th rowSpan={2}>اسم</th>
+                        <th rowSpan={2}>نمبر ثبت</th>
+                        <th rowSpan={2}>ولد</th>
+                        <th rowSpan={2}>صنف</th>
+                        {(studentPaymentList.month_labels || []).map((month) => (
+                          <th key={month.month_shamsi} colSpan={(studentPaymentList.categories || []).length + 1}>
+                            {month.label}
+                          </th>
+                        ))}
+                        {(studentPaymentList.categories || []).map((category) => (
+                          <th key={`total-head-${category.key}`} rowSpan={2}>
+                            مجموعه {category.label}
+                          </th>
+                        ))}
+                        <th rowSpan={2}>مجموعه شاگرد</th>
+                      </tr>
+                      <tr>
+                        {(studentPaymentList.month_labels || []).map((month) => (
+                          <Fragment key={`sub-${month.month_shamsi}`}>
+                            {(studentPaymentList.categories || []).map((category) => (
+                              <th key={`${month.month_shamsi}-${category.key}`}>{category.label}</th>
+                            ))}
+                            <th>جمع ماه</th>
+                          </Fragment>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(studentPaymentList.rows || []).map((row) => (
+                        <tr key={row.student_id}>
+                          <td>{row.row_number}</td>
+                          <td>{row.name}</td>
+                          <td>{row.registration_number}</td>
+                          <td>{row.father_name}</td>
+                          <td>{row.class_name}</td>
+                          {(row.months || []).map((month) => (
+                            <Fragment key={`${row.student_id}-${month.month_shamsi}`}>
+                              {(studentPaymentList.categories || []).map((category) => (
+                                <td key={`${month.month_shamsi}-${category.key}`}>
+                                  {month.displays?.[category.key] || "//"}
+                                </td>
+                              ))}
+                              <td>{month.month_total}</td>
+                            </Fragment>
+                          ))}
+                          {(studentPaymentList.categories || []).map((category) => (
+                            <td key={`ct-${row.student_id}-${category.key}`}>
+                              {row.category_totals?.[category.key] || "0.00"}
+                            </td>
+                          ))}
+                          <td>{row.subtotal}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={5}>مجموعه نهایی</td>
+                        {(studentPaymentList.summary?.month_totals || []).map((month) => (
+                          <Fragment key={`ft-${month.month_shamsi}`}>
+                            {(studentPaymentList.categories || []).map((category) => (
+                              <td key={`ft-${month.month_shamsi}-${category.key}`}>
+                                {month.amounts?.[category.key] || "0.00"}
+                              </td>
+                            ))}
+                            <td>{month.month_total}</td>
+                          </Fragment>
+                        ))}
+                        {(studentPaymentList.categories || []).map((category) => (
+                          <td key={`fct-${category.key}`}>
+                            {studentPaymentList.summary?.category_totals?.[category.key] || "0.00"}
+                          </td>
+                        ))}
+                        <td>{studentPaymentList.summary?.grand_total}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+                {!studentPaymentList.rows?.length ? (
+                  <div className="muted-panel" style={{ marginTop: 12 }}>
+                    No students found.
                   </div>
                 ) : null}
               </div>

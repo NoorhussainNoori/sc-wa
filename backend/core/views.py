@@ -962,6 +962,176 @@ class TeacherSalaryListReportView(APIView):
         )
 
 
+STUDENT_PAYMENT_CATEGORY_META = (
+    ("monthly", "فیس ماهوار", "monthly"),
+    ("transport", "ترانسپورت", "transport"),
+    ("uniform", "یونیفورم", "uniform"),
+    ("book", "کتاب", "book"),
+)
+
+
+def _parse_student_payment_categories(raw: str | None) -> list[tuple[str, str, str]]:
+    allowed = {item[0]: item for item in STUDENT_PAYMENT_CATEGORY_META}
+    if not raw or not str(raw).strip():
+        return list(STUDENT_PAYMENT_CATEGORY_META)
+    selected = []
+    for token in str(raw).split(","):
+        key = token.strip().lower()
+        if key in allowed and allowed[key] not in selected:
+            selected.append(allowed[key])
+    return selected or list(STUDENT_PAYMENT_CATEGORY_META)
+
+
+class StudentPaymentListReportView(APIView):
+    """
+    Excel-style student payment matrix for one Shamsi year.
+
+    Columns: student info + each month with selected fee categories
+    (monthly / transport / uniform / book), student subtotal, then grand total.
+    """
+
+    def get(self, request):
+        year_param = (request.query_params.get("year_shamsi") or "").strip()
+        if year_param:
+            if not year_param.isdigit() or len(year_param) != 4:
+                return Response(
+                    {"detail": "year_shamsi must be a 4-digit Shamsi year (e.g. 1404)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            year = int(year_param)
+        else:
+            year = jdatetime.date.today().year
+
+        categories = _parse_student_payment_categories(request.query_params.get("categories"))
+        category_keys = [item[0] for item in categories]
+        class_id = (request.query_params.get("class_id") or "").strip()
+
+        month_keys = [f"{year:04d}-{month:02d}" for month in range(1, 13)]
+        students = Student.objects.select_related("school_class").all().order_by(
+            "school_class__name", "name", "id"
+        )
+        if class_id:
+            students = students.filter(school_class_id=class_id)
+
+        fee_type_ids_by_category: dict[str, list[int]] = {}
+        for key, _label, needle in categories:
+            ids = list(FeeType.objects.filter(name__icontains=needle).values_list("id", flat=True))
+            fee_type_ids_by_category[key] = ids
+
+        all_fee_type_ids = [fee_id for ids in fee_type_ids_by_category.values() for fee_id in ids]
+        paid_map: dict[tuple[int, str, str], Decimal] = {}
+        if all_fee_type_ids:
+            payment_rows = (
+                Payment.objects.filter(
+                    fee_type_id__in=all_fee_type_ids,
+                    month_shamsi__startswith=f"{year:04d}-",
+                )
+                .values("student_id", "month_shamsi", "fee_type_id")
+                .annotate(paid=Sum("amount"))
+            )
+            fee_id_to_category = {}
+            for key, ids in fee_type_ids_by_category.items():
+                for fee_id in ids:
+                    fee_id_to_category[fee_id] = key
+            for row in payment_rows:
+                category_key = fee_id_to_category.get(row["fee_type_id"])
+                if not category_key:
+                    continue
+                map_key = (row["student_id"], row["month_shamsi"], category_key)
+                paid_map[map_key] = paid_map.get(map_key, Decimal("0")) + (row["paid"] or Decimal("0"))
+
+        rows = []
+        grand_category_totals = {key: Decimal("0") for key in category_keys}
+        grand_total = Decimal("0")
+        month_category_totals = {
+            month_key: {key: Decimal("0") for key in category_keys} for month_key in month_keys
+        }
+
+        for index, student in enumerate(students, start=1):
+            months = []
+            category_totals = {key: Decimal("0") for key in category_keys}
+            student_subtotal = Decimal("0")
+
+            for month_num, month_key in enumerate(month_keys, start=1):
+                amounts = {}
+                displays = {}
+                month_total = Decimal("0")
+                for key in category_keys:
+                    paid = paid_map.get((student.id, month_key, key), Decimal("0"))
+                    has_payment = paid > 0
+                    amounts[key] = _money_str(paid) if has_payment else None
+                    displays[key] = _money_str(paid) if has_payment else "//"
+                    if has_payment:
+                        month_total += paid
+                        category_totals[key] += paid
+                        month_category_totals[month_key][key] += paid
+                student_subtotal += month_total
+                months.append(
+                    {
+                        "month_num": month_num,
+                        "month_shamsi": month_key,
+                        "label": SHAMSI_MONTH_LABELS_DARI[month_num - 1],
+                        "amounts": amounts,
+                        "displays": displays,
+                        "month_total": _money_str(month_total) if month_total > 0 else "//",
+                    }
+                )
+
+            for key in category_keys:
+                grand_category_totals[key] += category_totals[key]
+            grand_total += student_subtotal
+
+            rows.append(
+                {
+                    "row_number": index,
+                    "student_id": student.id,
+                    "name": student.name,
+                    "registration_number": student.registration_number,
+                    "father_name": student.father_name,
+                    "class_name": student.school_class.name if student.school_class_id else "",
+                    "class_year_shamsi": student.school_class.year_shamsi if student.school_class_id else "",
+                    "is_active": student.is_active,
+                    "months": months,
+                    "category_totals": {key: _money_str(category_totals[key]) for key in category_keys},
+                    "subtotal": _money_str(student_subtotal),
+                }
+            )
+
+        return Response(
+            {
+                "year_shamsi": f"{year:04d}",
+                "categories": [{"key": key, "label": label} for key, label, _needle in categories],
+                "month_labels": [
+                    {"month_num": i + 1, "label": label, "month_shamsi": month_keys[i]}
+                    for i, label in enumerate(SHAMSI_MONTH_LABELS_DARI)
+                ],
+                "filters": {
+                    "class_id": class_id,
+                    "categories": category_keys,
+                },
+                "rows": rows,
+                "summary": {
+                    "students_count": len(rows),
+                    "category_totals": {key: _money_str(grand_category_totals[key]) for key in category_keys},
+                    "grand_total": _money_str(grand_total),
+                    "month_totals": [
+                        {
+                            "month_shamsi": month_key,
+                            "label": SHAMSI_MONTH_LABELS_DARI[i],
+                            "amounts": {
+                                key: _money_str(month_category_totals[month_key][key]) for key in category_keys
+                            },
+                            "month_total": _money_str(
+                                sum(month_category_totals[month_key].values(), Decimal("0"))
+                            ),
+                        }
+                        for i, month_key in enumerate(month_keys)
+                    ],
+                },
+            }
+        )
+
+
 def _join_unique_parts(values, separator="/") -> str:
     seen = set()
     parts = []

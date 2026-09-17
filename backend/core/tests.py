@@ -631,6 +631,70 @@ class TestCoreSmokeTests(APITestCase):
         self.assertEqual(row["total_salary"], "15000.00")
         self.assertEqual(row["months_paid_count"], 2)
 
+    def test_student_payment_list_report_matrix(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+        monthly, _ = FeeType.objects.get_or_create(name="Monthly", defaults={"requires_reason": False})
+        transport, _ = FeeType.objects.get_or_create(name="Transport", defaults={"requires_reason": False})
+        uniform, _ = FeeType.objects.get_or_create(name="Uniform", defaults={"requires_reason": False})
+        book, _ = FeeType.objects.get_or_create(name="Book", defaults={"requires_reason": False})
+
+        Payment.objects.create(
+            student=self.student,
+            fee_type=monthly,
+            amount=Decimal("500.00"),
+            date_shamsi=jdatetime.date(1405, 1, 10),
+            month_shamsi="1405-01",
+            bill_number="90001",
+        )
+        Payment.objects.create(
+            student=self.student,
+            fee_type=transport,
+            amount=Decimal("250.00"),
+            date_shamsi=jdatetime.date(1405, 1, 10),
+            month_shamsi="1405-01",
+            bill_number="90002",
+        )
+        Payment.objects.create(
+            student=self.student,
+            fee_type=uniform,
+            amount=Decimal("800.00"),
+            date_shamsi=jdatetime.date(1405, 2, 5),
+            month_shamsi="1405-02",
+            bill_number="90003",
+        )
+        Payment.objects.create(
+            student=self.student,
+            fee_type=book,
+            amount=Decimal("400.00"),
+            date_shamsi=jdatetime.date(1405, 3, 1),
+            month_shamsi="1405-03",
+            bill_number="90004",
+        )
+
+        res = self.client.get(
+            "/api/reports/student-payment-list/?year_shamsi=1405&categories=monthly,transport,uniform,book"
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["year_shamsi"], "1405")
+        self.assertEqual([c["key"] for c in res.data["categories"]], ["monthly", "transport", "uniform", "book"])
+        row = next(item for item in res.data["rows"] if item["student_id"] == self.student.id)
+        self.assertEqual(row["months"][0]["displays"]["monthly"], "500.00")
+        self.assertEqual(row["months"][0]["displays"]["transport"], "250.00")
+        self.assertEqual(row["months"][0]["displays"]["uniform"], "//")
+        self.assertEqual(row["months"][1]["displays"]["uniform"], "800.00")
+        self.assertEqual(row["months"][2]["displays"]["book"], "400.00")
+        self.assertEqual(row["category_totals"]["monthly"], "500.00")
+        self.assertEqual(row["subtotal"], "1950.00")
+        self.assertEqual(res.data["summary"]["grand_total"], "1950.00")
+
+        monthly_only = self.client.get(
+            "/api/reports/student-payment-list/?year_shamsi=1405&categories=monthly"
+        )
+        self.assertEqual(monthly_only.status_code, 200, monthly_only.data)
+        self.assertEqual([c["key"] for c in monthly_only.data["categories"]], ["monthly"])
+        monthly_row = next(item for item in monthly_only.data["rows"] if item["student_id"] == self.student.id)
+        self.assertEqual(monthly_row["subtotal"], "500.00")
+
 
 class BackupFixtureRepairTests(TestCase):
     def test_repairs_dumpdata_jalali_year_bug(self):
