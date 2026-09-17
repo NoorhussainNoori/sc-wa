@@ -14,6 +14,7 @@ from .views import (
     MonthlyDueFeesView,
     ClassMonthlyFeesReportView,
     TeacherStatementReportView,
+    TeacherSalaryListReportView,
     ExpenseCategoryStatementReportView,
     StudentStatementReportView,
     BackupExportView,
@@ -43,6 +44,11 @@ urlpatterns = [
         "reports/teacher-statement/",
         TeacherStatementReportView.as_view(),
         name="report-teacher-statement",
+    ),
+    path(
+        "reports/teacher-salary-list/",
+        TeacherSalaryListReportView.as_view(),
+        name="report-teacher-salary-list",
     ),
     path(
         "reports/student-statement/",

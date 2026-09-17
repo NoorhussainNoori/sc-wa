@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+﻿import { Fragment, useState } from "react";
 import { apiFetch, extractListData, extractPaginationMeta } from "../api.js";
 import Field from "../components/Field.jsx";
 import PaginationControls from "../components/PaginationControls.jsx";
@@ -65,6 +65,11 @@ export default function Reports() {
   const [teacherStatementError, setTeacherStatementError] = useState("");
   const [loadingTeacherSearch, setLoadingTeacherSearch] = useState(false);
   const [loadingTeacherStatement, setLoadingTeacherStatement] = useState(false);
+  const [teacherSalaryYear, setTeacherSalaryYear] = useState("");
+  const [teacherSalaryList, setTeacherSalaryList] = useState(null);
+  const [teacherSalaryError, setTeacherSalaryError] = useState("");
+  const [loadingTeacherSalaryList, setLoadingTeacherSalaryList] = useState(false);
+  const [exportingTeacherSalaryExcel, setExportingTeacherSalaryExcel] = useState(false);
   const [expenseCategories, setExpenseCategories] = useState([]);
   const [selectedExpenseCategoryId, setSelectedExpenseCategoryId] = useState("");
   const [expenseStatementStart, setExpenseStatementStart] = useState("");
@@ -240,6 +245,24 @@ export default function Reports() {
       setTeacherStatement(null);
     } finally {
       setLoadingTeacherStatement(false);
+    }
+  };
+
+  const loadTeacherSalaryList = async () => {
+    setTeacherSalaryError("");
+    setLoadingTeacherSalaryList(true);
+    try {
+      const params = new URLSearchParams();
+      const year = String(teacherSalaryYear || "").trim();
+      if (year) params.set("year_shamsi", year);
+      const query = params.toString();
+      const data = await apiFetch(`/reports/teacher-salary-list/${query ? `?${query}` : ""}`);
+      setTeacherSalaryList(data);
+    } catch (err) {
+      setTeacherSalaryError(err.message || "Failed to load teacher salary list.");
+      setTeacherSalaryList(null);
+    } finally {
+      setLoadingTeacherSalaryList(false);
     }
   };
 
@@ -883,6 +906,246 @@ export default function Reports() {
     reportWindow.print();
   };
 
+  const exportTeacherSalaryListExcel = async () => {
+    if (!teacherSalaryList) return;
+    setExportingTeacherSalaryExcel(true);
+    try {
+      const ExcelJS = (await import("exceljs")).default;
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = template.schoolName || "School Finance";
+      const sheet = workbook.addWorksheet("لیست معاشات", {
+        views: [{ rightToLeft: true, state: "frozen", xSplit: 4, ySplit: 3 }],
+      });
+
+      const thinBorder = {
+        top: { style: "thin", color: { argb: "FF334155" } },
+        left: { style: "thin", color: { argb: "FF334155" } },
+        bottom: { style: "thin", color: { argb: "FF334155" } },
+        right: { style: "thin", color: { argb: "FF334155" } },
+      };
+      const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE2E8F0" } };
+      const titleFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDBEAFE" } };
+      const totalFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } };
+
+      const monthLabels = teacherSalaryList.month_labels || [];
+      const totalCols = 4 + monthLabels.length * 2 + 2;
+      sheet.getColumn(1).width = 8;
+      sheet.getColumn(2).width = 16;
+      sheet.getColumn(3).width = 16;
+      sheet.getColumn(4).width = 14;
+      for (let i = 5; i <= totalCols; i += 1) {
+        sheet.getColumn(i).width = 11;
+      }
+
+      sheet.mergeCells(1, 1, 1, totalCols);
+      const title = sheet.getCell(1, 1);
+      title.value = `لیست معاشات پرسونل ${template.schoolName || ""} سال ${teacherSalaryList.year_shamsi}`;
+      title.font = { bold: true, size: 13 };
+      title.alignment = { horizontal: "center", vertical: "middle" };
+      title.fill = titleFill;
+      for (let c = 1; c <= totalCols; c += 1) {
+        sheet.getCell(1, c).border = thinBorder;
+      }
+      sheet.getRow(1).height = 24;
+
+      const headerRow1 = sheet.getRow(2);
+      const headerRow2 = sheet.getRow(3);
+      ["شماره", "اسم", "ولد", "وظیفه"].forEach((label, idx) => {
+        sheet.mergeCells(2, idx + 1, 3, idx + 1);
+        const cell = sheet.getCell(2, idx + 1);
+        cell.value = label;
+        cell.font = { bold: true };
+        cell.fill = headerFill;
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+      });
+
+      monthLabels.forEach((month, index) => {
+        const col = 5 + index * 2;
+        sheet.mergeCells(2, col, 2, col + 1);
+        const monthCell = sheet.getCell(2, col);
+        monthCell.value = month.label;
+        monthCell.font = { bold: true };
+        monthCell.fill = headerFill;
+        monthCell.alignment = { horizontal: "center", vertical: "middle" };
+        headerRow2.getCell(col).value = "معاش";
+        headerRow2.getCell(col + 1).value = "مالیه ۲٪";
+        headerRow2.getCell(col).font = { bold: true };
+        headerRow2.getCell(col + 1).font = { bold: true };
+        headerRow2.getCell(col).fill = headerFill;
+        headerRow2.getCell(col + 1).fill = headerFill;
+      });
+
+      const monthsPaidCol = 5 + monthLabels.length * 2;
+      const totalSalaryCol = monthsPaidCol + 1;
+      sheet.mergeCells(2, monthsPaidCol, 3, monthsPaidCol);
+      sheet.mergeCells(2, totalSalaryCol, 3, totalSalaryCol);
+      sheet.getCell(2, monthsPaidCol).value = "مجموعه ماه";
+      sheet.getCell(2, totalSalaryCol).value = "مجموعه معاش";
+      [monthsPaidCol, totalSalaryCol].forEach((col) => {
+        sheet.getCell(2, col).font = { bold: true };
+        sheet.getCell(2, col).fill = headerFill;
+        sheet.getCell(2, col).alignment = { horizontal: "center", vertical: "middle" };
+      });
+
+      for (let r = 2; r <= 3; r += 1) {
+        for (let c = 1; c <= totalCols; c += 1) {
+          sheet.getCell(r, c).border = thinBorder;
+          sheet.getCell(r, c).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+        }
+      }
+
+      let rowNum = 4;
+      (teacherSalaryList.rows || []).forEach((row) => {
+        sheet.getCell(rowNum, 1).value = row.row_number;
+        sheet.getCell(rowNum, 2).value = row.name || "";
+        sheet.getCell(rowNum, 3).value = row.father_name || "";
+        sheet.getCell(rowNum, 4).value = row.department || "";
+        (row.months || []).forEach((month, index) => {
+          const col = 5 + index * 2;
+          const paidNum = month.has_payment ? Number(month.paid) : null;
+          sheet.getCell(rowNum, col).value = month.has_payment
+            ? Number.isFinite(paidNum)
+              ? paidNum
+              : month.paid_display
+            : "//";
+          if (month.has_payment && Number.isFinite(paidNum)) {
+            sheet.getCell(rowNum, col).numFmt = "#,##0.00";
+          }
+          sheet.getCell(rowNum, col + 1).value = month.has_payment ? Number(month.tax_display) : "//";
+        });
+        sheet.getCell(rowNum, monthsPaidCol).value = row.months_paid_count;
+        const totalNum = Number(row.total_salary);
+        sheet.getCell(rowNum, totalSalaryCol).value = Number.isFinite(totalNum) ? totalNum : row.total_salary;
+        sheet.getCell(rowNum, totalSalaryCol).numFmt = "#,##0.00";
+        for (let c = 1; c <= totalCols; c += 1) {
+          sheet.getCell(rowNum, c).border = thinBorder;
+          sheet.getCell(rowNum, c).alignment = { horizontal: "center", vertical: "middle" };
+        }
+        sheet.getCell(rowNum, 2).alignment = { horizontal: "right", vertical: "middle" };
+        sheet.getCell(rowNum, 3).alignment = { horizontal: "right", vertical: "middle" };
+        sheet.getCell(rowNum, 4).alignment = { horizontal: "right", vertical: "middle" };
+        rowNum += 1;
+      });
+
+      sheet.getCell(rowNum, 1).value = "";
+      sheet.mergeCells(rowNum, 2, rowNum, 4);
+      sheet.getCell(rowNum, 2).value = "مجموعه";
+      (teacherSalaryList.summary?.month_totals || []).forEach((month, index) => {
+        const col = 5 + index * 2;
+        sheet.getCell(rowNum, col).value = Number(month.salary || 0);
+        sheet.getCell(rowNum, col).numFmt = "#,##0.00";
+        sheet.getCell(rowNum, col + 1).value = Number(month.tax || 0);
+        sheet.getCell(rowNum, col + 1).numFmt = "#,##0.00";
+      });
+      sheet.getCell(rowNum, totalSalaryCol).value = Number(teacherSalaryList.summary?.total_salary || 0);
+      sheet.getCell(rowNum, totalSalaryCol).numFmt = "#,##0.00";
+      for (let c = 1; c <= totalCols; c += 1) {
+        sheet.getCell(rowNum, c).border = thinBorder;
+        sheet.getCell(rowNum, c).font = { bold: true };
+        sheet.getCell(rowNum, c).fill = totalFill;
+        sheet.getCell(rowNum, c).alignment = { horizontal: "center", vertical: "middle" };
+      }
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `teacher_salary_list_${teacherSalaryList.year_shamsi}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setTeacherSalaryError(err.message || "Failed to export Excel file.");
+    } finally {
+      setExportingTeacherSalaryExcel(false);
+    }
+  };
+
+  const printTeacherSalaryList = () => {
+    if (!teacherSalaryList) return;
+    const reportWindow = window.open("", "_blank", "width=1400,height=900");
+    if (!reportWindow) return;
+    const monthLabels = teacherSalaryList.month_labels || [];
+    const headMonths = monthLabels
+      .map((month) => `<th colspan="2">${escapeHtml(month.label)}</th>`)
+      .join("");
+    const subHeadMonths = monthLabels.map(() => "<th>معاش</th><th>مالیه ۲٪</th>").join("");
+    const bodyRows = (teacherSalaryList.rows || [])
+      .map((row) => {
+        const months = (row.months || [])
+          .map(
+            (month) =>
+              `<td>${escapeHtml(month.paid_display)}</td><td>${escapeHtml(month.tax_display)}</td>`
+          )
+          .join("");
+        return `<tr>
+          <td>${escapeHtml(row.row_number)}</td>
+          <td class="name">${escapeHtml(row.name)}</td>
+          <td class="name">${escapeHtml(row.father_name)}</td>
+          <td class="name">${escapeHtml(row.department)}</td>
+          ${months}
+          <td>${escapeHtml(row.months_paid_count)}</td>
+          <td>${escapeHtml(row.total_salary)}</td>
+        </tr>`;
+      })
+      .join("");
+    const totalMonths = (teacherSalaryList.summary?.month_totals || [])
+      .map((month) => `<td>${escapeHtml(month.salary)}</td><td>${escapeHtml(month.tax)}</td>`)
+      .join("");
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>لیست معاشات</title>
+          <style>
+            @page { size: A4 landscape; margin: 8mm; }
+            body { font-family: Tahoma, "Segoe UI", sans-serif; direction: rtl; color: #0f172a; }
+            h1 { margin: 0 0 10px; font-size: 1.1rem; text-align: center; }
+            table { width: 100%; border-collapse: collapse; font-size: 9px; }
+            th, td { border: 1px solid #334155; padding: 3px 4px; text-align: center; }
+            th { background: #e2e8f0; }
+            td.name { text-align: right; }
+            tfoot td { background: #f1f5f9; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h1>لیست معاشات پرسونل ${escapeHtml(template.schoolName || "")} سال ${escapeHtml(teacherSalaryList.year_shamsi)}</h1>
+          <table>
+            <thead>
+              <tr>
+                <th rowspan="2">شماره</th>
+                <th rowspan="2">اسم</th>
+                <th rowspan="2">ولد</th>
+                <th rowspan="2">وظیفه</th>
+                ${headMonths}
+                <th rowspan="2">مجموعه ماه</th>
+                <th rowspan="2">مجموعه معاش</th>
+              </tr>
+              <tr>${subHeadMonths}</tr>
+            </thead>
+            <tbody>${bodyRows || '<tr><td colspan="30">موردی یافت نشد</td></tr>'}</tbody>
+            <tfoot>
+              <tr>
+                <td colspan="4">مجموعه</td>
+                ${totalMonths}
+                <td></td>
+                <td>${escapeHtml(teacherSalaryList.summary?.total_salary || "0.00")}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </body>
+      </html>
+    `;
+    reportWindow.document.write(html);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
+  };
+
   const exportExpenseStatementExcel = async () => {
     if (!expenseStatement) return;
     setExportingExpenseExcel(true);
@@ -1377,6 +1640,8 @@ export default function Reports() {
                     ? "Excel-style expense category report: item, quantity, amount, bill number, and notes."
                   : activeTab === "teacherStatement"
                     ? "A printable salary statement for one teacher, with monthly salary payouts and balance."
+                  : activeTab === "teacherSalaryList"
+                    ? "Excel-style staff salary matrix for the year: months, 2% tax, and totals."
                   : "Receipt appearance for printed bills."}
           </p>
         </div>
@@ -1399,6 +1664,14 @@ export default function Reports() {
         ) : activeTab === "teacherStatement" ? (
           <button className="button button-primary" onClick={loadTeacherStatement} disabled={loadingTeacherStatement}>
             {loadingTeacherStatement ? "Generating..." : "Generate Statement"}
+          </button>
+        ) : activeTab === "teacherSalaryList" ? (
+          <button
+            className="button button-primary"
+            onClick={loadTeacherSalaryList}
+            disabled={loadingTeacherSalaryList}
+          >
+            {loadingTeacherSalaryList ? "Generating..." : "Generate Report"}
           </button>
         ) : (
           <button className="button button-primary" onClick={saveTemplate} disabled={savingTemplate}>
@@ -1447,6 +1720,13 @@ export default function Reports() {
           onClick={() => setActiveTab("teacherStatement")}
         >
           Teacher statement
+        </button>
+        <button
+          className={activeTab === "teacherSalaryList" ? "button button-primary" : "button button-outline"}
+          type="button"
+          onClick={() => setActiveTab("teacherSalaryList")}
+        >
+          Teacher salary list
         </button>
         <button
           className={activeTab === "template" ? "button button-primary" : "button button-outline"}
@@ -1512,6 +1792,22 @@ export default function Reports() {
             Export CSV
           </button>
           <button className="button button-outline" type="button" onClick={printTeacherStatement}>
+            Print
+          </button>
+        </div>
+      ) : null}
+
+      {activeTab === "teacherSalaryList" && teacherSalaryList ? (
+        <div className="inline-actions">
+          <button
+            className="button button-outline"
+            type="button"
+            onClick={exportTeacherSalaryListExcel}
+            disabled={exportingTeacherSalaryExcel}
+          >
+            {exportingTeacherSalaryExcel ? "Exporting..." : "Export Excel"}
+          </button>
+          <button className="button button-outline" type="button" onClick={printTeacherSalaryList}>
             Print
           </button>
         </div>
@@ -2264,6 +2560,116 @@ export default function Reports() {
                 {!teacherStatement.salary_payments?.length ? (
                   <div className="muted-panel" style={{ marginTop: 12 }}>
                     No salary payments found for this statement range.
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : null}
+        </>
+      ) : null}
+
+      {activeTab === "teacherSalaryList" ? (
+        <>
+          <div className="panel">
+            <h3>Salary list options</h3>
+            <p className="muted-panel" style={{ marginBottom: 12 }}>
+              Same layout as the Excel <strong>لیست معاشات</strong>: all teachers, each month salary + مالیه ۲٪
+              (0 under 5000, else 2% of amount above 5000). Unpaid months show <strong>//</strong>.
+            </p>
+            <div className="form-grid">
+              <Field label="Shamsi Year (YYYY, optional)">
+                <input
+                  className="input"
+                  value={teacherSalaryYear}
+                  onChange={(event) => setTeacherSalaryYear(event.target.value)}
+                  placeholder="1404"
+                />
+              </Field>
+            </div>
+            {loadingTeacherSalaryList ? <div className="status-message">Generating salary list...</div> : null}
+            {teacherSalaryError ? <div className="form-error">{teacherSalaryError}</div> : null}
+          </div>
+
+          {teacherSalaryList ? (
+            <>
+              <div className="stats-grid">
+                <StatCard label="Year" value={teacherSalaryList.year_shamsi || "—"} />
+                <StatCard label="Teachers" value={teacherSalaryList.summary?.teachers_count || "—"} />
+                <StatCard label="Total Salaries" value={teacherSalaryList.summary?.total_salary || "—"} />
+                <StatCard label="Total Tax" value={teacherSalaryList.summary?.total_tax || "—"} />
+              </div>
+
+              <div className="panel">
+                <h3>لیست معاشات پرسونل — سال {teacherSalaryList.year_shamsi}</h3>
+                <div className="salary-sheet-wrap">
+                  <table className="salary-sheet">
+                    <thead>
+                      <tr>
+                        <th className="sticky-col col-no" rowSpan={2}>
+                          شماره
+                        </th>
+                        <th className="sticky-col col-name" rowSpan={2}>
+                          اسم
+                        </th>
+                        <th className="sticky-col col-father" rowSpan={2}>
+                          ولد
+                        </th>
+                        <th className="sticky-col col-role" rowSpan={2}>
+                          وظیفه
+                        </th>
+                        {(teacherSalaryList.month_labels || []).map((month) => (
+                          <th key={month.month_shamsi} colSpan={2}>
+                            {month.label}
+                          </th>
+                        ))}
+                        <th rowSpan={2}>مجموعه ماه</th>
+                        <th rowSpan={2}>مجموعه معاش</th>
+                      </tr>
+                      <tr>
+                        {(teacherSalaryList.month_labels || []).map((month) => (
+                          <Fragment key={`sub-${month.month_shamsi}`}>
+                            <th>معاش</th>
+                            <th>مالیه ۲٪</th>
+                          </Fragment>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(teacherSalaryList.rows || []).map((row) => (
+                        <tr key={row.teacher_id}>
+                          <td className="sticky-col col-no">{row.row_number}</td>
+                          <td className="sticky-col col-name">{row.name}</td>
+                          <td className="sticky-col col-father">{row.father_name}</td>
+                          <td className="sticky-col col-role">{row.department}</td>
+                          {(row.months || []).map((month) => (
+                            <Fragment key={`${row.teacher_id}-${month.month_shamsi}`}>
+                              <td>{month.paid_display}</td>
+                              <td>{month.tax_display}</td>
+                            </Fragment>
+                          ))}
+                          <td>{row.months_paid_count}</td>
+                          <td>{row.total_salary}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={4}>مجموعه</td>
+                        {(teacherSalaryList.summary?.month_totals || []).map((month) => (
+                          <Fragment key={`total-${month.month_shamsi}`}>
+                            <td>{month.salary}</td>
+                            <td>{month.tax}</td>
+                          </Fragment>
+                        ))}
+                        <td></td>
+                        <td>{teacherSalaryList.summary?.total_salary}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+                {!teacherSalaryList.rows?.length ? (
+                  <div className="muted-panel" style={{ marginTop: 12 }}>
+                    No teachers found.
                   </div>
                 ) : null}
               </div>

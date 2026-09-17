@@ -3,7 +3,7 @@ import io
 import json
 import os
 import tempfile
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import jdatetime
 from django.core.management import call_command
 from django.db import transaction
@@ -826,6 +826,137 @@ class TeacherStatementReportView(APIView):
                     "total_paid": _money_str(total_paid),
                     "total_balance": _money_str(total_balance),
                     "total_due": _money_str(total_balance),
+                },
+            }
+        )
+
+
+SHAMSI_MONTH_LABELS_DARI = (
+    "حمل",
+    "ثور",
+    "جوزا",
+    "سرطان",
+    "اسد",
+    "سنبله",
+    "میزان",
+    "عقرب",
+    "قوس",
+    "جدی",
+    "دلو",
+    "حوت",
+)
+
+
+def _salary_tax_two_percent(amount: Decimal) -> Decimal:
+    """
+    Afghan-style simple withholding matching the school's Excel list:
+    0 on amounts <= 5000, else 2% of (amount - 5000).
+    """
+    taxable = max(amount - Decimal("5000"), Decimal("0"))
+    return (taxable * Decimal("0.02")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+
+class TeacherSalaryListReportView(APIView):
+    """
+    Excel-style staff salary matrix for one Shamsi year:
+    شماره | اسم | ولد | وظیفه | each month + مالیه ۲٪ | مجموعه معاش
+    """
+
+    def get(self, request):
+        year_param = (request.query_params.get("year_shamsi") or "").strip()
+        if year_param:
+            if not year_param.isdigit() or len(year_param) != 4:
+                return Response(
+                    {"detail": "year_shamsi must be a 4-digit Shamsi year (e.g. 1404)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            year = int(year_param)
+        else:
+            year = jdatetime.date.today().year
+
+        month_keys = [f"{year:04d}-{month:02d}" for month in range(1, 13)]
+        teachers = list(Teacher.objects.all().order_by("id"))
+        payments = (
+            TeacherSalaryPayment.objects.filter(month_shamsi__startswith=f"{year:04d}-")
+            .values("teacher_id", "month_shamsi")
+            .annotate(paid=Sum("amount"))
+        )
+        paid_map: dict[tuple[int, str], Decimal] = {
+            (row["teacher_id"], row["month_shamsi"]): row["paid"] or Decimal("0") for row in payments
+        }
+
+        rows = []
+        grand_salary_total = Decimal("0")
+        grand_tax_total = Decimal("0")
+        month_salary_totals = {key: Decimal("0") for key in month_keys}
+        month_tax_totals = {key: Decimal("0") for key in month_keys}
+
+        for index, teacher in enumerate(teachers, start=1):
+            months = []
+            salary_total = Decimal("0")
+            tax_total = Decimal("0")
+            months_paid_count = 0
+            for month_num, month_key in enumerate(month_keys, start=1):
+                paid = paid_map.get((teacher.id, month_key), Decimal("0"))
+                has_payment = paid > 0
+                tax = _salary_tax_two_percent(paid) if has_payment else Decimal("0")
+                if has_payment:
+                    months_paid_count += 1
+                    salary_total += paid
+                    tax_total += tax
+                    month_salary_totals[month_key] += paid
+                    month_tax_totals[month_key] += tax
+                months.append(
+                    {
+                        "month_num": month_num,
+                        "month_shamsi": month_key,
+                        "label": SHAMSI_MONTH_LABELS_DARI[month_num - 1],
+                        "paid": _money_str(paid) if has_payment else None,
+                        "paid_display": _money_str(paid) if has_payment else "//",
+                        "tax": _money_str(tax) if has_payment else None,
+                        "tax_display": f"{int(tax)}" if has_payment else "//",
+                        "has_payment": has_payment,
+                    }
+                )
+
+            grand_salary_total += salary_total
+            grand_tax_total += tax_total
+            rows.append(
+                {
+                    "row_number": index,
+                    "teacher_id": teacher.id,
+                    "name": teacher.name,
+                    "father_name": teacher.father_name,
+                    "department": teacher.department,
+                    "base_salary": _money_str(teacher.salary),
+                    "months": months,
+                    "months_paid_count": months_paid_count,
+                    "total_salary": _money_str(salary_total),
+                    "total_tax": _money_str(tax_total),
+                }
+            )
+
+        return Response(
+            {
+                "year_shamsi": f"{year:04d}",
+                "month_labels": [
+                    {"month_num": i + 1, "label": label, "month_shamsi": month_keys[i]}
+                    for i, label in enumerate(SHAMSI_MONTH_LABELS_DARI)
+                ],
+                "rows": rows,
+                "summary": {
+                    "teachers_count": len(rows),
+                    "total_salary": _money_str(grand_salary_total),
+                    "total_tax": _money_str(grand_tax_total),
+                    "month_totals": [
+                        {
+                            "month_shamsi": key,
+                            "label": SHAMSI_MONTH_LABELS_DARI[i],
+                            "salary": _money_str(month_salary_totals[key]),
+                            "tax": _money_str(month_tax_totals[key]),
+                        }
+                        for i, key in enumerate(month_keys)
+                    ],
                 },
             }
         )

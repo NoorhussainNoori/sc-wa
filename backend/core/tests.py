@@ -592,6 +592,45 @@ class TestCoreSmokeTests(APITestCase):
         section_names = {section["category"]["name"] for section in all_res.data["sections"]}
         self.assertEqual(section_names, {"Utilities", "Supplies"})
 
+    def test_teacher_salary_list_report_matrix(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+        teacher = Teacher.objects.create(
+            name="نصیبه",
+            father_name="عبدالغفار",
+            phone="700000111",
+            email="t@example.com",
+            address="Kabul",
+            salary=Decimal("11000.00"),
+            department="سرمعلم",
+        )
+        TeacherSalaryPayment.objects.create(
+            teacher=teacher,
+            amount=Decimal("11000.00"),
+            date_shamsi=jdatetime.date(1404, 1, 5),
+        )
+        TeacherSalaryPayment.objects.create(
+            teacher=teacher,
+            amount=Decimal("4000.00"),
+            date_shamsi=jdatetime.date(1404, 2, 5),
+        )
+
+        res = self.client.get("/api/reports/teacher-salary-list/?year_shamsi=1404")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["year_shamsi"], "1404")
+        self.assertEqual(len(res.data["month_labels"]), 12)
+        self.assertEqual(res.data["summary"]["teachers_count"], 1)
+        row = res.data["rows"][0]
+        self.assertEqual(row["name"], "نصیبه")
+        self.assertEqual(row["father_name"], "عبدالغفار")
+        self.assertEqual(row["department"], "سرمعلم")
+        self.assertEqual(row["months"][0]["paid_display"], "11000.00")
+        self.assertEqual(row["months"][0]["tax_display"], "120")  # (11000-5000)*2%
+        self.assertEqual(row["months"][1]["paid_display"], "4000.00")
+        self.assertEqual(row["months"][1]["tax_display"], "0")
+        self.assertEqual(row["months"][2]["paid_display"], "//")
+        self.assertEqual(row["total_salary"], "15000.00")
+        self.assertEqual(row["months_paid_count"], 2)
+
 
 class BackupFixtureRepairTests(TestCase):
     def test_repairs_dumpdata_jalali_year_bug(self):
