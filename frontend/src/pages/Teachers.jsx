@@ -55,6 +55,7 @@ export default function Teachers() {
     previous: null,
   });
   const [salaryPaymentForm, setSalaryPaymentForm] = useState(emptySalaryPayment);
+  const [editingSalaryPaymentId, setEditingSalaryPaymentId] = useState(null);
   const [loadingSalaryPayments, setLoadingSalaryPayments] = useState(false);
   const [savingSalaryPayment, setSavingSalaryPayment] = useState(false);
 
@@ -191,10 +192,12 @@ export default function Teachers() {
     setSalaryPaymentsMeta({ count: 0, next: null, previous: null });
     setSalaryPaymentsPage(1);
     setSalaryPaymentForm(emptySalaryPayment);
+    setEditingSalaryPaymentId(null);
   };
 
   const onSelectTeacherForPayment = (teacher) => {
     setSelectedTeacher(teacher);
+    setEditingSalaryPaymentId(null);
     setSalaryPaymentForm({
       date_shamsi: "",
       amount: teacher.salary || "",
@@ -206,6 +209,43 @@ export default function Teachers() {
 
   const onSalaryPaymentChange = (field) => (event) => {
     setSalaryPaymentForm((prev) => ({ ...prev, [field]: event.target.value }));
+  };
+
+  const resetSalaryPaymentForm = () => {
+    setEditingSalaryPaymentId(null);
+    setSalaryPaymentForm({
+      date_shamsi: "",
+      amount: selectedTeacher?.salary || "",
+      notes: "",
+    });
+  };
+
+  const onEditSalaryPayment = (payment) => {
+    setEditingSalaryPaymentId(payment.id);
+    setSalaryPaymentForm({
+      date_shamsi: payment.date_shamsi || "",
+      amount: payment.amount || "",
+      notes: payment.notes || "",
+    });
+    setError("");
+  };
+
+  const onDeleteSalaryPayment = async (payment) => {
+    if (!window.confirm(`Delete salary payment #${payment.id} (${payment.date_shamsi}, ${payment.amount})?`)) {
+      return;
+    }
+    setError("");
+    try {
+      await apiFetch(`/teacher-salary-payments/${payment.id}/`, { method: "DELETE" });
+      if (editingSalaryPaymentId === payment.id) {
+        resetSalaryPaymentForm();
+      }
+      const nextPage =
+        salaryPayments.length === 1 && salaryPaymentsPage > 1 ? salaryPaymentsPage - 1 : salaryPaymentsPage;
+      await loadSalaryPayments(selectedTeacher.id, nextPage);
+    } catch (err) {
+      setError(err.message || "Failed to delete salary payment.");
+    }
   };
 
   const onSalaryPaymentSubmit = async (event) => {
@@ -220,24 +260,30 @@ export default function Teachers() {
     }
     setError("");
     setSavingSalaryPayment(true);
+    const wasEditing = Boolean(editingSalaryPaymentId);
+    const pageToReload = wasEditing ? salaryPaymentsPage : 1;
     try {
-      await apiFetch("/teacher-salary-payments/", {
-        method: "POST",
-        body: JSON.stringify({
-          teacher: selectedTeacher.id,
-          date_shamsi: salaryPaymentForm.date_shamsi,
-          amount: salaryPaymentForm.amount,
-          notes: salaryPaymentForm.notes || "",
-        }),
-      });
-      setSalaryPaymentForm({
-        date_shamsi: "",
-        amount: selectedTeacher.salary || "",
-        notes: "",
-      });
-      await loadSalaryPayments(selectedTeacher.id, 1);
+      const payload = {
+        teacher: selectedTeacher.id,
+        date_shamsi: salaryPaymentForm.date_shamsi,
+        amount: salaryPaymentForm.amount,
+        notes: salaryPaymentForm.notes || "",
+      };
+      if (editingSalaryPaymentId) {
+        await apiFetch(`/teacher-salary-payments/${editingSalaryPaymentId}/`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await apiFetch("/teacher-salary-payments/", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      }
+      resetSalaryPaymentForm();
+      await loadSalaryPayments(selectedTeacher.id, pageToReload);
     } catch (err) {
-      setError(err.message || "Failed to save salary payment.");
+      setError(err.message || `Failed to ${wasEditing ? "update" : "save"} salary payment.`);
     } finally {
       setSavingSalaryPayment(false);
     }
@@ -496,7 +542,7 @@ export default function Teachers() {
           </div>
 
           <div className="panel">
-            <h3>2. Record Salary Payment</h3>
+            <h3>{editingSalaryPaymentId ? "2. Edit Salary Payment" : "2. Record Salary Payment"}</h3>
             {!selectedTeacher ? (
               <div className="muted-panel">Select a teacher above to record a payment.</div>
             ) : (
@@ -535,8 +581,17 @@ export default function Teachers() {
                   />
                 </Field>
                 <button className="button button-primary" type="submit" disabled={savingSalaryPayment}>
-                  {savingSalaryPayment ? "Saving..." : "Save Salary Payment"}
+                  {savingSalaryPayment
+                    ? "Saving..."
+                    : editingSalaryPaymentId
+                      ? "Update Salary Payment"
+                      : "Save Salary Payment"}
                 </button>
+                {editingSalaryPaymentId ? (
+                  <button className="button button-outline" type="button" onClick={resetSalaryPaymentForm}>
+                    Cancel Edit
+                  </button>
+                ) : null}
               </form>
             )}
             {error ? <div className="form-error">{error}</div> : null}
@@ -556,15 +611,34 @@ export default function Teachers() {
                   <div className="table-head">
                     <div>ID</div>
                     <div>Date</div>
+                    <div>Month</div>
                     <div>Amount</div>
                     <div>Notes</div>
+                    <div>Actions</div>
                   </div>
                   {salaryPayments.map((payment) => (
                     <div className="table-row" key={payment.id}>
                       <div>{payment.id}</div>
                       <div>{payment.date_shamsi}</div>
+                      <div>{payment.month_shamsi || "—"}</div>
                       <div>{payment.amount}</div>
                       <div>{payment.notes || "—"}</div>
+                      <div className="inline-actions">
+                        <button
+                          className="button button-outline"
+                          type="button"
+                          onClick={() => onEditSalaryPayment(payment)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="button button-outline"
+                          type="button"
+                          onClick={() => onDeleteSalaryPayment(payment)}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
