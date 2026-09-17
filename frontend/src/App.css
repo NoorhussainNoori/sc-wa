@@ -468,6 +468,18 @@
   color: #334155;
 }
 
+.salary-sheet td.pay-status-ok {
+  color: #166534;
+  background: #dcfce7;
+  font-weight: 700;
+}
+
+.salary-sheet td.pay-status-no {
+  color: #991b1b;
+  background: #fee2e2;
+  font-weight: 700;
+}
+
 .form-error {
   margin-top: 10px;
   color: #dc2626;

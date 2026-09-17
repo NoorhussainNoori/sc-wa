@@ -3,7 +3,7 @@ import io
 import json
 import os
 import tempfile
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 import jdatetime
 from django.core.management import call_command
 from django.db import transaction
@@ -333,23 +333,16 @@ class ReportSummaryView(APIView):
 
         payment_qs = Payment.objects.select_related("student", "fee_type", "school_class").all()
         expense_qs = Expense.objects.select_related("category").all()
+        salary_qs = TeacherSalaryPayment.objects.select_related("teacher").all()
 
         if period in {"day", "month", "year"} and date:
             try:
-                if period == "day":
-                    target_date = _parse_shamsi_date(date)
-                    payment_qs = payment_qs.filter(date_shamsi=target_date)
-                    expense_qs = expense_qs.filter(date_shamsi=target_date)
-                elif period == "month":
-                    year, month_num = _parse_shamsi_month(date)
-                    payment_qs = payment_qs.filter(date_shamsi__year=year, date_shamsi__month=month_num)
-                    expense_qs = expense_qs.filter(date_shamsi__year=year, date_shamsi__month=month_num)
-                elif period == "year":
-                    year = _parse_shamsi_year(date)
-                    payment_qs = payment_qs.filter(date_shamsi__year=year)
-                    expense_qs = expense_qs.filter(date_shamsi__year=year)
+                start_date, end_date = _shamsi_period_bounds(period, date)
             except ValueError as exc:
                 return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            payment_qs = payment_qs.filter(date_shamsi__gte=start_date, date_shamsi__lte=end_date)
+            expense_qs = expense_qs.filter(date_shamsi__gte=start_date, date_shamsi__lte=end_date)
+            salary_qs = salary_qs.filter(date_shamsi__gte=start_date, date_shamsi__lte=end_date)
         elif period == "custom" and start and end:
             try:
                 start_date = _parse_shamsi_date(start)
@@ -358,20 +351,28 @@ class ReportSummaryView(APIView):
                 return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
             payment_qs = payment_qs.filter(date_shamsi__gte=start_date, date_shamsi__lte=end_date)
             expense_qs = expense_qs.filter(date_shamsi__gte=start_date, date_shamsi__lte=end_date)
+            salary_qs = salary_qs.filter(date_shamsi__gte=start_date, date_shamsi__lte=end_date)
 
         total_revenue = payment_qs.aggregate(total=Sum("amount")).get("total") or Decimal("0")
-        total_expenses = expense_qs.aggregate(total=Sum("amount")).get("total") or Decimal("0")
+        expense_records_total = expense_qs.aggregate(total=Sum("amount")).get("total") or Decimal("0")
+        teacher_salaries_total = salary_qs.aggregate(total=Sum("amount")).get("total") or Decimal("0")
+        total_expenses = expense_records_total + teacher_salaries_total
         profit = total_revenue - total_expenses
 
         response = {
             "total_revenue": total_revenue,
             "total_expenses": total_expenses,
+            "expense_records_total": expense_records_total,
+            "teacher_salaries_total": teacher_salaries_total,
             "profit": profit,
         }
 
         if include_items:
             response["payments"] = PaymentSerializer(payment_qs.order_by("-created_at"), many=True).data
             response["expenses"] = ExpenseSerializer(expense_qs.order_by("-created_at"), many=True).data
+            response["teacher_salary_payments"] = TeacherSalaryPaymentSerializer(
+                salary_qs.order_by("-created_at"), many=True
+            ).data
 
         return Response(response)
 
@@ -847,19 +848,10 @@ SHAMSI_MONTH_LABELS_DARI = (
 )
 
 
-def _salary_tax_two_percent(amount: Decimal) -> Decimal:
-    """
-    Afghan-style simple withholding matching the school's Excel list:
-    0 on amounts <= 5000, else 2% of (amount - 5000).
-    """
-    taxable = max(amount - Decimal("5000"), Decimal("0"))
-    return (taxable * Decimal("0.02")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-
-
 class TeacherSalaryListReportView(APIView):
     """
     Excel-style staff salary matrix for one Shamsi year:
-    شماره | اسم | ولد | وظیفه | each month + مالیه ۲٪ | مجموعه معاش
+    شماره | اسم | ولد | وظیفه | each month salary | مجموعه معاش
     """
 
     def get(self, request):
@@ -887,25 +879,19 @@ class TeacherSalaryListReportView(APIView):
 
         rows = []
         grand_salary_total = Decimal("0")
-        grand_tax_total = Decimal("0")
         month_salary_totals = {key: Decimal("0") for key in month_keys}
-        month_tax_totals = {key: Decimal("0") for key in month_keys}
 
         for index, teacher in enumerate(teachers, start=1):
             months = []
             salary_total = Decimal("0")
-            tax_total = Decimal("0")
             months_paid_count = 0
             for month_num, month_key in enumerate(month_keys, start=1):
                 paid = paid_map.get((teacher.id, month_key), Decimal("0"))
                 has_payment = paid > 0
-                tax = _salary_tax_two_percent(paid) if has_payment else Decimal("0")
                 if has_payment:
                     months_paid_count += 1
                     salary_total += paid
-                    tax_total += tax
                     month_salary_totals[month_key] += paid
-                    month_tax_totals[month_key] += tax
                 months.append(
                     {
                         "month_num": month_num,
@@ -913,14 +899,11 @@ class TeacherSalaryListReportView(APIView):
                         "label": SHAMSI_MONTH_LABELS_DARI[month_num - 1],
                         "paid": _money_str(paid) if has_payment else None,
                         "paid_display": _money_str(paid) if has_payment else "//",
-                        "tax": _money_str(tax) if has_payment else None,
-                        "tax_display": f"{int(tax)}" if has_payment else "//",
                         "has_payment": has_payment,
                     }
                 )
 
             grand_salary_total += salary_total
-            grand_tax_total += tax_total
             rows.append(
                 {
                     "row_number": index,
@@ -932,7 +915,6 @@ class TeacherSalaryListReportView(APIView):
                     "months": months,
                     "months_paid_count": months_paid_count,
                     "total_salary": _money_str(salary_total),
-                    "total_tax": _money_str(tax_total),
                 }
             )
 
@@ -947,13 +929,11 @@ class TeacherSalaryListReportView(APIView):
                 "summary": {
                     "teachers_count": len(rows),
                     "total_salary": _money_str(grand_salary_total),
-                    "total_tax": _money_str(grand_tax_total),
                     "month_totals": [
                         {
                             "month_shamsi": key,
                             "label": SHAMSI_MONTH_LABELS_DARI[i],
                             "salary": _money_str(month_salary_totals[key]),
-                            "tax": _money_str(month_tax_totals[key]),
                         }
                         for i, key in enumerate(month_keys)
                     ],
@@ -1628,6 +1608,33 @@ def _parse_shamsi_year(value: str) -> int:
         return int(value)
     except ValueError as exc:
         raise ValueError("Invalid year format. Use YYYY.") from exc
+
+
+def _shamsi_month_end(year: int, month: int) -> jdatetime.date:
+    if month == 12:
+        next_month_start = jdatetime.date(year + 1, 1, 1)
+    else:
+        next_month_start = jdatetime.date(year, month + 1, 1)
+    return next_month_start - jdatetime.timedelta(days=1)
+
+
+def _shamsi_period_bounds(period: str, date_value: str) -> tuple[jdatetime.date, jdatetime.date]:
+    """
+    Inclusive Shamsi start/end dates for day/month/year filters.
+
+    django-jalali date_shamsi__year / __month lookups operate on Gregorian storage
+    and return wrong results, so callers should filter with __gte/__lte instead.
+    """
+    if period == "day":
+        target = _parse_shamsi_date(date_value)
+        return target, target
+    if period == "month":
+        year, month_num = _parse_shamsi_month(date_value)
+        return jdatetime.date(year, month_num, 1), _shamsi_month_end(year, month_num)
+    if period == "year":
+        year = _parse_shamsi_year(date_value)
+        return jdatetime.date(year, 1, 1), _shamsi_month_end(year, 12)
+    raise ValueError("Unsupported period.")
 
 
 def _current_shamsi_month() -> str:

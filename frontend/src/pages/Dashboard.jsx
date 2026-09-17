@@ -18,12 +18,21 @@ export default function Dashboard() {
 
   const payments = Array.isArray(summary?.payments) ? summary.payments : [];
   const expenses = Array.isArray(summary?.expenses) ? summary.expenses : [];
+  const salaryPayments = Array.isArray(summary?.teacher_salary_payments)
+    ? summary.teacher_salary_payments
+    : [];
   const totalRevenue = Number(summary?.total_revenue || 0);
   const totalExpenses = Number(summary?.total_expenses || 0);
+  const expenseRecordsTotal = Number(summary?.expense_records_total ?? expenses.reduce((sum, item) => sum + Number(item.amount || 0), 0));
+  const teacherSalariesTotal = Number(
+    summary?.teacher_salaries_total ??
+      salaryPayments.reduce((sum, item) => sum + Number(item.amount || 0), 0)
+  );
   const profit = Number(summary?.profit || 0);
+  const outflowCount = expenses.length + salaryPayments.length;
   const netMargin = totalRevenue > 0 ? ((profit / totalRevenue) * 100).toFixed(1) : "0.0";
   const avgPayment = payments.length ? (totalRevenue / payments.length).toFixed(2) : "0.00";
-  const avgExpense = expenses.length ? (totalExpenses / expenses.length).toFixed(2) : "0.00";
+  const avgExpense = outflowCount ? (totalExpenses / outflowCount).toFixed(2) : "0.00";
 
   const topFeeType = Object.entries(
     payments.reduce((acc, item) => {
@@ -34,15 +43,39 @@ export default function Dashboard() {
   ).sort((a, b) => b[1] - a[1])[0];
 
   const topExpenseCategory = Object.entries(
-    expenses.reduce((acc, item) => {
-      const key = item.category_name || item.category || "Unknown";
-      acc[key] = (acc[key] || 0) + Number(item.amount || 0);
+    [
+      ...expenses.map((item) => ({
+        key: item.category_name || item.category || "Unknown",
+        amount: Number(item.amount || 0),
+      })),
+      ...(teacherSalariesTotal > 0
+        ? [{ key: "Teacher salaries", amount: teacherSalariesTotal }]
+        : []),
+    ].reduce((acc, item) => {
+      acc[item.key] = (acc[item.key] || 0) + item.amount;
       return acc;
     }, {})
   ).sort((a, b) => b[1] - a[1])[0];
 
   const recentPayments = payments.slice(0, 5);
-  const recentExpenses = expenses.slice(0, 5);
+  const recentOutflows = [
+    ...expenses.map((item) => ({
+      id: `exp-${item.id}`,
+      primary: item.category_name || "Category",
+      secondary: item.paid_by || "Expense",
+      amount: item.amount,
+      sortKey: item.created_at || item.date_shamsi || "",
+    })),
+    ...salaryPayments.map((item) => ({
+      id: `sal-${item.id}`,
+      primary: item.teacher_name || "Teacher",
+      secondary: item.teacher_department || "Salary",
+      amount: item.amount,
+      sortKey: item.created_at || item.date_shamsi || "",
+    })),
+  ]
+    .sort((a, b) => String(b.sortKey).localeCompare(String(a.sortKey)))
+    .slice(0, 5);
 
   const onChange = (field) => (event) => {
     setFilters((prev) => ({ ...prev, [field]: event.target.value }));
@@ -157,12 +190,22 @@ export default function Dashboard() {
         <StatCard
           label="Total Expenses"
           value={summary ? summary.total_expenses : "—"}
-          hint="All expense records"
+          hint="Expenses + teacher salaries"
+        />
+        <StatCard
+          label="Teacher Salaries"
+          value={summary ? teacherSalariesTotal : "—"}
+          hint="Included in total expenses"
+        />
+        <StatCard
+          label="Other Expenses"
+          value={summary ? expenseRecordsTotal : "—"}
+          hint="Expense records only"
         />
         <StatCard
           label="Profit"
           value={summary ? summary.profit : "—"}
-          hint="Revenue - Expenses"
+          hint="Revenue − expenses − salaries"
         />
         <StatCard
           label="Transactions"
@@ -170,9 +213,9 @@ export default function Dashboard() {
           hint="Total payment records"
         />
         <StatCard
-          label="Expense Entries"
-          value={summary ? expenses.length : "—"}
-          hint="Total expense records"
+          label="Outflow Entries"
+          value={summary ? outflowCount : "—"}
+          hint="Expenses + salary payments"
         />
         <StatCard
           label="Avg Payment"
@@ -204,7 +247,7 @@ export default function Dashboard() {
                 </strong>
               </div>
               <div className="kpi-line">
-                <span>Avg Expense</span>
+                <span>Avg Outflow</span>
                 <strong>{avgExpense}</strong>
               </div>
               <div className="kpi-line">
@@ -234,13 +277,13 @@ export default function Dashboard() {
           </div>
 
           <div className="panel">
-            <h3>Recent Expenses</h3>
-            {recentExpenses.length ? (
+            <h3>Recent Expenses & Salaries</h3>
+            {recentOutflows.length ? (
               <div className="mini-list">
-                {recentExpenses.map((item) => (
-                  <div className="mini-list-row" key={`exp-${item.id}`}>
-                    <span>{item.category_name || "Category"}</span>
-                    <span>{item.paid_by || "—"}</span>
+                {recentOutflows.map((item) => (
+                  <div className="mini-list-row" key={item.id}>
+                    <span>{item.primary}</span>
+                    <span>{item.secondary}</span>
                     <strong>{item.amount}</strong>
                   </div>
                 ))}

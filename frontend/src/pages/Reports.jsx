@@ -82,6 +82,7 @@ export default function Reports() {
   const [studentPaymentError, setStudentPaymentError] = useState("");
   const [loadingStudentPaymentList, setLoadingStudentPaymentList] = useState(false);
   const [exportingStudentPaymentExcel, setExportingStudentPaymentExcel] = useState(false);
+  const [studentPaymentStatusOnly, setStudentPaymentStatusOnly] = useState(false);
   const [reportClasses, setReportClasses] = useState([]);
   const [expenseCategories, setExpenseCategories] = useState([]);
   const [selectedExpenseCategoryId, setSelectedExpenseCategoryId] = useState("");
@@ -99,6 +100,20 @@ export default function Reports() {
 
   const moneySum = (...values) =>
     values.reduce((acc, value) => acc + (Number(value) || 0), 0).toFixed(2);
+
+  const isStudentCategoryPaid = (month, categoryKey) => {
+    const amount = month?.amounts?.[categoryKey];
+    if (amount != null && amount !== "") return Number(amount) > 0;
+    const display = month?.displays?.[categoryKey];
+    return Boolean(display && display !== "//");
+  };
+
+  const studentPaymentCellValue = (month, categoryKey) => {
+    if (studentPaymentStatusOnly) {
+      return isStudentCategoryPaid(month, categoryKey) ? "✓" : "✗";
+    }
+    return month?.displays?.[categoryKey] || "//";
+  };
 
   const classMonthTotals = (() => {
     const rows = classMonthReport?.classes || [];
@@ -962,7 +977,7 @@ export default function Reports() {
       const workbook = new ExcelJS.Workbook();
       workbook.creator = template.schoolName || "School Finance";
       const sheet = workbook.addWorksheet("لیست معاشات", {
-        views: [{ rightToLeft: true, state: "frozen", xSplit: 4, ySplit: 3 }],
+        views: [{ rightToLeft: true, state: "frozen", xSplit: 4, ySplit: 2 }],
       });
 
       const thinBorder = {
@@ -976,7 +991,7 @@ export default function Reports() {
       const totalFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } };
 
       const monthLabels = teacherSalaryList.month_labels || [];
-      const totalCols = 4 + monthLabels.length * 2 + 2;
+      const totalCols = 4 + monthLabels.length + 2;
       sheet.getColumn(1).width = 8;
       sheet.getColumn(2).width = 16;
       sheet.getColumn(3).width = 16;
@@ -996,10 +1011,7 @@ export default function Reports() {
       }
       sheet.getRow(1).height = 24;
 
-      const headerRow1 = sheet.getRow(2);
-      const headerRow2 = sheet.getRow(3);
       ["شماره", "اسم", "ولد", "وظیفه"].forEach((label, idx) => {
-        sheet.mergeCells(2, idx + 1, 3, idx + 1);
         const cell = sheet.getCell(2, idx + 1);
         cell.value = label;
         cell.font = { bold: true };
@@ -1008,25 +1020,15 @@ export default function Reports() {
       });
 
       monthLabels.forEach((month, index) => {
-        const col = 5 + index * 2;
-        sheet.mergeCells(2, col, 2, col + 1);
-        const monthCell = sheet.getCell(2, col);
-        monthCell.value = month.label;
-        monthCell.font = { bold: true };
-        monthCell.fill = headerFill;
-        monthCell.alignment = { horizontal: "center", vertical: "middle" };
-        headerRow2.getCell(col).value = "معاش";
-        headerRow2.getCell(col + 1).value = "مالیه ۲٪";
-        headerRow2.getCell(col).font = { bold: true };
-        headerRow2.getCell(col + 1).font = { bold: true };
-        headerRow2.getCell(col).fill = headerFill;
-        headerRow2.getCell(col + 1).fill = headerFill;
+        const cell = sheet.getCell(2, 5 + index);
+        cell.value = month.label;
+        cell.font = { bold: true };
+        cell.fill = headerFill;
+        cell.alignment = { horizontal: "center", vertical: "middle" };
       });
 
-      const monthsPaidCol = 5 + monthLabels.length * 2;
+      const monthsPaidCol = 5 + monthLabels.length;
       const totalSalaryCol = monthsPaidCol + 1;
-      sheet.mergeCells(2, monthsPaidCol, 3, monthsPaidCol);
-      sheet.mergeCells(2, totalSalaryCol, 3, totalSalaryCol);
       sheet.getCell(2, monthsPaidCol).value = "مجموعه ماه";
       sheet.getCell(2, totalSalaryCol).value = "مجموعه معاش";
       [monthsPaidCol, totalSalaryCol].forEach((col) => {
@@ -1035,21 +1037,19 @@ export default function Reports() {
         sheet.getCell(2, col).alignment = { horizontal: "center", vertical: "middle" };
       });
 
-      for (let r = 2; r <= 3; r += 1) {
-        for (let c = 1; c <= totalCols; c += 1) {
-          sheet.getCell(r, c).border = thinBorder;
-          sheet.getCell(r, c).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-        }
+      for (let c = 1; c <= totalCols; c += 1) {
+        sheet.getCell(2, c).border = thinBorder;
+        sheet.getCell(2, c).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
       }
 
-      let rowNum = 4;
+      let rowNum = 3;
       (teacherSalaryList.rows || []).forEach((row) => {
         sheet.getCell(rowNum, 1).value = row.row_number;
         sheet.getCell(rowNum, 2).value = row.name || "";
         sheet.getCell(rowNum, 3).value = row.father_name || "";
         sheet.getCell(rowNum, 4).value = row.department || "";
         (row.months || []).forEach((month, index) => {
-          const col = 5 + index * 2;
+          const col = 5 + index;
           const paidNum = month.has_payment ? Number(month.paid) : null;
           sheet.getCell(rowNum, col).value = month.has_payment
             ? Number.isFinite(paidNum)
@@ -1059,7 +1059,6 @@ export default function Reports() {
           if (month.has_payment && Number.isFinite(paidNum)) {
             sheet.getCell(rowNum, col).numFmt = "#,##0.00";
           }
-          sheet.getCell(rowNum, col + 1).value = month.has_payment ? Number(month.tax_display) : "//";
         });
         sheet.getCell(rowNum, monthsPaidCol).value = row.months_paid_count;
         const totalNum = Number(row.total_salary);
@@ -1079,11 +1078,9 @@ export default function Reports() {
       sheet.mergeCells(rowNum, 2, rowNum, 4);
       sheet.getCell(rowNum, 2).value = "مجموعه";
       (teacherSalaryList.summary?.month_totals || []).forEach((month, index) => {
-        const col = 5 + index * 2;
+        const col = 5 + index;
         sheet.getCell(rowNum, col).value = Number(month.salary || 0);
         sheet.getCell(rowNum, col).numFmt = "#,##0.00";
-        sheet.getCell(rowNum, col + 1).value = Number(month.tax || 0);
-        sheet.getCell(rowNum, col + 1).numFmt = "#,##0.00";
       });
       sheet.getCell(rowNum, totalSalaryCol).value = Number(teacherSalaryList.summary?.total_salary || 0);
       sheet.getCell(rowNum, totalSalaryCol).numFmt = "#,##0.00";
@@ -1118,17 +1115,11 @@ export default function Reports() {
     const reportWindow = window.open("", "_blank", "width=1400,height=900");
     if (!reportWindow) return;
     const monthLabels = teacherSalaryList.month_labels || [];
-    const headMonths = monthLabels
-      .map((month) => `<th colspan="2">${escapeHtml(month.label)}</th>`)
-      .join("");
-    const subHeadMonths = monthLabels.map(() => "<th>معاش</th><th>مالیه ۲٪</th>").join("");
+    const headMonths = monthLabels.map((month) => `<th>${escapeHtml(month.label)}</th>`).join("");
     const bodyRows = (teacherSalaryList.rows || [])
       .map((row) => {
         const months = (row.months || [])
-          .map(
-            (month) =>
-              `<td>${escapeHtml(month.paid_display)}</td><td>${escapeHtml(month.tax_display)}</td>`
-          )
+          .map((month) => `<td>${escapeHtml(month.paid_display)}</td>`)
           .join("");
         return `<tr>
           <td>${escapeHtml(row.row_number)}</td>
@@ -1142,7 +1133,7 @@ export default function Reports() {
       })
       .join("");
     const totalMonths = (teacherSalaryList.summary?.month_totals || [])
-      .map((month) => `<td>${escapeHtml(month.salary)}</td><td>${escapeHtml(month.tax)}</td>`)
+      .map((month) => `<td>${escapeHtml(month.salary)}</td>`)
       .join("");
     const html = `
       <html>
@@ -1165,17 +1156,16 @@ export default function Reports() {
           <table>
             <thead>
               <tr>
-                <th rowspan="2">شماره</th>
-                <th rowspan="2">اسم</th>
-                <th rowspan="2">ولد</th>
-                <th rowspan="2">وظیفه</th>
+                <th>شماره</th>
+                <th>اسم</th>
+                <th>ولد</th>
+                <th>وظیفه</th>
                 ${headMonths}
-                <th rowspan="2">مجموعه ماه</th>
-                <th rowspan="2">مجموعه معاش</th>
+                <th>مجموعه ماه</th>
+                <th>مجموعه معاش</th>
               </tr>
-              <tr>${subHeadMonths}</tr>
             </thead>
-            <tbody>${bodyRows || '<tr><td colspan="30">موردی یافت نشد</td></tr>'}</tbody>
+            <tbody>${bodyRows || '<tr><td colspan="18">موردی یافت نشد</td></tr>'}</tbody>
             <tfoot>
               <tr>
                 <td colspan="4">مجموعه</td>
@@ -1201,7 +1191,7 @@ export default function Reports() {
       const ExcelJS = (await import("exceljs")).default;
       const workbook = new ExcelJS.Workbook();
       workbook.creator = template.schoolName || "School Finance";
-      const sheet = workbook.addWorksheet("پرداخت شاگردان", {
+      const sheet = workbook.addWorksheet(studentPaymentStatusOnly ? "وضعیت پرداخت" : "پرداخت شاگردان", {
         views: [{ rightToLeft: true, state: "frozen", xSplit: 5, ySplit: 3 }],
       });
 
@@ -1214,21 +1204,28 @@ export default function Reports() {
       const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE2E8F0" } };
       const titleFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDBEAFE" } };
       const totalFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } };
+      const paidFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCFCE7" } };
+      const unpaidFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFEE2E2" } };
 
       const categories = studentPaymentList.categories || [];
       const monthLabels = studentPaymentList.month_labels || [];
       const catCount = categories.length;
-      const totalCols = 5 + monthLabels.length * (catCount + 1) + catCount + 1;
+      const monthSpan = studentPaymentStatusOnly ? catCount : catCount + 1;
+      const totalCols = studentPaymentStatusOnly
+        ? 5 + monthLabels.length * monthSpan
+        : 5 + monthLabels.length * monthSpan + catCount + 1;
 
       for (let i = 1; i <= totalCols; i += 1) {
-        sheet.getColumn(i).width = i <= 5 ? 14 : 11;
+        sheet.getColumn(i).width = i <= 5 ? 14 : studentPaymentStatusOnly ? 8 : 11;
       }
       sheet.getColumn(1).width = 8;
       sheet.getColumn(2).width = 16;
 
       sheet.mergeCells(1, 1, 1, Math.max(totalCols, 6));
       const title = sheet.getCell(1, 1);
-      title.value = `لیست پرداخت‌های شاگردان ${template.schoolName || ""} سال ${studentPaymentList.year_shamsi}`;
+      title.value = studentPaymentStatusOnly
+        ? `وضعیت پرداخت شاگردان ${template.schoolName || ""} سال ${studentPaymentList.year_shamsi} (✓ پرداخت شده / ✗ نپرداخته)`
+        : `لیست پرداخت‌های شاگردان ${template.schoolName || ""} سال ${studentPaymentList.year_shamsi}`;
       title.font = { bold: true, size: 13 };
       title.alignment = { horizontal: "center", vertical: "middle" };
       title.fill = titleFill;
@@ -1246,8 +1243,7 @@ export default function Reports() {
 
       let col = 6;
       monthLabels.forEach((month) => {
-        const span = catCount + 1;
-        sheet.mergeCells(2, col, 2, col + span - 1);
+        sheet.mergeCells(2, col, 2, col + monthSpan - 1);
         const monthCell = sheet.getCell(2, col);
         monthCell.value = month.label;
         monthCell.font = { bold: true };
@@ -1259,27 +1255,31 @@ export default function Reports() {
           cell.font = { bold: true };
           cell.fill = headerFill;
         });
-        const totalCell = sheet.getCell(3, col + catCount);
-        totalCell.value = "جمع ماه";
-        totalCell.font = { bold: true };
-        totalCell.fill = headerFill;
-        col += span;
+        if (!studentPaymentStatusOnly) {
+          const totalCell = sheet.getCell(3, col + catCount);
+          totalCell.value = "جمع ماه";
+          totalCell.font = { bold: true };
+          totalCell.fill = headerFill;
+        }
+        col += monthSpan;
       });
 
-      categories.forEach((category, index) => {
-        sheet.mergeCells(2, col + index, 3, col + index);
-        const cell = sheet.getCell(2, col + index);
-        cell.value = `مجموعه ${category.label}`;
-        cell.font = { bold: true };
-        cell.fill = headerFill;
-        cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-      });
-      sheet.mergeCells(2, col + catCount, 3, col + catCount);
-      const subtotalHeader = sheet.getCell(2, col + catCount);
-      subtotalHeader.value = "مجموعه شاگرد";
-      subtotalHeader.font = { bold: true };
-      subtotalHeader.fill = headerFill;
-      subtotalHeader.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      if (!studentPaymentStatusOnly) {
+        categories.forEach((category, index) => {
+          sheet.mergeCells(2, col + index, 3, col + index);
+          const cell = sheet.getCell(2, col + index);
+          cell.value = `مجموعه ${category.label}`;
+          cell.font = { bold: true };
+          cell.fill = headerFill;
+          cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+        });
+        sheet.mergeCells(2, col + catCount, 3, col + catCount);
+        const subtotalHeader = sheet.getCell(2, col + catCount);
+        subtotalHeader.value = "مجموعه شاگرد";
+        subtotalHeader.font = { bold: true };
+        subtotalHeader.fill = headerFill;
+        subtotalHeader.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      }
 
       for (let r = 2; r <= 3; r += 1) {
         for (let c = 1; c <= totalCols; c += 1) {
@@ -1302,36 +1302,48 @@ export default function Reports() {
         let c = 6;
         (row.months || []).forEach((month) => {
           categories.forEach((category) => {
-            const display = month.displays?.[category.key];
-            const raw = month.amounts?.[category.key];
-            const num = Number(raw);
-            sheet.getCell(rowNum, c).value = display === "//" ? "//" : Number.isFinite(num) ? num : display || "//";
-            if (display !== "//" && Number.isFinite(num)) {
-              sheet.getCell(rowNum, c).numFmt = "#,##0.00";
+            const cell = sheet.getCell(rowNum, c);
+            if (studentPaymentStatusOnly) {
+              const paid = isStudentCategoryPaid(month, category.key);
+              cell.value = paid ? "✓" : "✗";
+              cell.fill = paid ? paidFill : unpaidFill;
+              cell.font = { bold: true, color: { argb: paid ? "FF166534" : "FF991B1B" } };
+            } else {
+              const display = month.displays?.[category.key];
+              const raw = month.amounts?.[category.key];
+              const num = Number(raw);
+              cell.value = display === "//" ? "//" : Number.isFinite(num) ? num : display || "//";
+              if (display !== "//" && Number.isFinite(num)) {
+                cell.numFmt = "#,##0.00";
+              }
             }
             c += 1;
           });
-          const monthTotalNum = Number(month.month_total);
-          sheet.getCell(rowNum, c).value =
-            month.month_total === "//"
-              ? "//"
-              : Number.isFinite(monthTotalNum)
-                ? monthTotalNum
-                : month.month_total;
-          if (month.month_total !== "//" && Number.isFinite(monthTotalNum)) {
-            sheet.getCell(rowNum, c).numFmt = "#,##0.00";
+          if (!studentPaymentStatusOnly) {
+            const monthTotalNum = Number(month.month_total);
+            sheet.getCell(rowNum, c).value =
+              month.month_total === "//"
+                ? "//"
+                : Number.isFinite(monthTotalNum)
+                  ? monthTotalNum
+                  : month.month_total;
+            if (month.month_total !== "//" && Number.isFinite(monthTotalNum)) {
+              sheet.getCell(rowNum, c).numFmt = "#,##0.00";
+            }
+            c += 1;
           }
-          c += 1;
         });
-        categories.forEach((category) => {
-          const num = Number(row.category_totals?.[category.key] || 0);
-          sheet.getCell(rowNum, c).value = num;
+        if (!studentPaymentStatusOnly) {
+          categories.forEach((category) => {
+            const num = Number(row.category_totals?.[category.key] || 0);
+            sheet.getCell(rowNum, c).value = num;
+            sheet.getCell(rowNum, c).numFmt = "#,##0.00";
+            c += 1;
+          });
+          const subtotalNum = Number(row.subtotal || 0);
+          sheet.getCell(rowNum, c).value = subtotalNum;
           sheet.getCell(rowNum, c).numFmt = "#,##0.00";
-          c += 1;
-        });
-        const subtotalNum = Number(row.subtotal || 0);
-        sheet.getCell(rowNum, c).value = subtotalNum;
-        sheet.getCell(rowNum, c).numFmt = "#,##0.00";
+        }
 
         for (let i = 1; i <= totalCols; i += 1) {
           sheet.getCell(rowNum, i).border = thinBorder;
@@ -1343,34 +1355,36 @@ export default function Reports() {
         rowNum += 1;
       });
 
-      sheet.mergeCells(rowNum, 1, rowNum, 5);
-      sheet.getCell(rowNum, 1).value = "مجموعه نهایی";
-      let footerCol = 6;
-      (studentPaymentList.summary?.month_totals || []).forEach((month) => {
+      if (!studentPaymentStatusOnly) {
+        sheet.mergeCells(rowNum, 1, rowNum, 5);
+        sheet.getCell(rowNum, 1).value = "مجموعه نهایی";
+        let footerCol = 6;
+        (studentPaymentList.summary?.month_totals || []).forEach((month) => {
+          categories.forEach((category) => {
+            const num = Number(month.amounts?.[category.key] || 0);
+            sheet.getCell(rowNum, footerCol).value = num;
+            sheet.getCell(rowNum, footerCol).numFmt = "#,##0.00";
+            footerCol += 1;
+          });
+          const monthTotalNum = Number(month.month_total || 0);
+          sheet.getCell(rowNum, footerCol).value = monthTotalNum;
+          sheet.getCell(rowNum, footerCol).numFmt = "#,##0.00";
+          footerCol += 1;
+        });
         categories.forEach((category) => {
-          const num = Number(month.amounts?.[category.key] || 0);
+          const num = Number(studentPaymentList.summary?.category_totals?.[category.key] || 0);
           sheet.getCell(rowNum, footerCol).value = num;
           sheet.getCell(rowNum, footerCol).numFmt = "#,##0.00";
           footerCol += 1;
         });
-        const monthTotalNum = Number(month.month_total || 0);
-        sheet.getCell(rowNum, footerCol).value = monthTotalNum;
+        sheet.getCell(rowNum, footerCol).value = Number(studentPaymentList.summary?.grand_total || 0);
         sheet.getCell(rowNum, footerCol).numFmt = "#,##0.00";
-        footerCol += 1;
-      });
-      categories.forEach((category) => {
-        const num = Number(studentPaymentList.summary?.category_totals?.[category.key] || 0);
-        sheet.getCell(rowNum, footerCol).value = num;
-        sheet.getCell(rowNum, footerCol).numFmt = "#,##0.00";
-        footerCol += 1;
-      });
-      sheet.getCell(rowNum, footerCol).value = Number(studentPaymentList.summary?.grand_total || 0);
-      sheet.getCell(rowNum, footerCol).numFmt = "#,##0.00";
-      for (let i = 1; i <= totalCols; i += 1) {
-        sheet.getCell(rowNum, i).border = thinBorder;
-        sheet.getCell(rowNum, i).font = { bold: true };
-        sheet.getCell(rowNum, i).fill = totalFill;
-        sheet.getCell(rowNum, i).alignment = { horizontal: "center", vertical: "middle" };
+        for (let i = 1; i <= totalCols; i += 1) {
+          sheet.getCell(rowNum, i).border = thinBorder;
+          sheet.getCell(rowNum, i).font = { bold: true };
+          sheet.getCell(rowNum, i).fill = totalFill;
+          sheet.getCell(rowNum, i).alignment = { horizontal: "center", vertical: "middle" };
+        }
       }
 
       const buffer = await workbook.xlsx.writeBuffer();
@@ -1380,7 +1394,9 @@ export default function Reports() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `student_payment_list_${studentPaymentList.year_shamsi}.xlsx`;
+      a.download = studentPaymentStatusOnly
+        ? `student_payment_status_${studentPaymentList.year_shamsi}.xlsx`
+        : `student_payment_list_${studentPaymentList.year_shamsi}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1398,31 +1414,45 @@ export default function Reports() {
     if (!reportWindow) return;
     const categories = studentPaymentList.categories || [];
     const monthLabels = studentPaymentList.month_labels || [];
+    const monthSpan = studentPaymentStatusOnly ? categories.length : categories.length + 1;
     const headMonths = monthLabels
-      .map((month) => `<th colspan="${categories.length + 1}">${escapeHtml(month.label)}</th>`)
+      .map((month) => `<th colspan="${monthSpan}">${escapeHtml(month.label)}</th>`)
       .join("");
     const subHeadMonths = monthLabels
       .map(
         () =>
-          `${categories.map((category) => `<th>${escapeHtml(category.label)}</th>`).join("")}<th>جمع ماه</th>`
+          `${categories.map((category) => `<th>${escapeHtml(category.label)}</th>`).join("")}${
+            studentPaymentStatusOnly ? "" : "<th>جمع ماه</th>"
+          }`
       )
       .join("");
-    const categoryTotalHeads = categories
-      .map((category) => `<th rowspan="2">مجموعه ${escapeHtml(category.label)}</th>`)
-      .join("");
+    const categoryTotalHeads = studentPaymentStatusOnly
+      ? ""
+      : categories.map((category) => `<th rowspan="2">مجموعه ${escapeHtml(category.label)}</th>`).join("");
     const bodyRows = (studentPaymentList.rows || [])
       .map((row) => {
         const months = (row.months || [])
           .map((month) => {
             const cats = categories
-              .map((category) => `<td>${escapeHtml(month.displays?.[category.key] || "//")}</td>`)
+              .map((category) => {
+                if (studentPaymentStatusOnly) {
+                  const paid = isStudentCategoryPaid(month, category.key);
+                  return `<td class="${paid ? "paid" : "unpaid"}">${paid ? "✓" : "✗"}</td>`;
+                }
+                return `<td>${escapeHtml(month.displays?.[category.key] || "//")}</td>`;
+              })
               .join("");
-            return `${cats}<td>${escapeHtml(month.month_total)}</td>`;
+            return studentPaymentStatusOnly
+              ? cats
+              : `${cats}<td>${escapeHtml(month.month_total)}</td>`;
           })
           .join("");
-        const catTotals = categories
-          .map((category) => `<td>${escapeHtml(row.category_totals?.[category.key] || "0.00")}</td>`)
-          .join("");
+        const catTotals = studentPaymentStatusOnly
+          ? ""
+          : categories
+              .map((category) => `<td>${escapeHtml(row.category_totals?.[category.key] || "0.00")}</td>`)
+              .join("");
+        const subtotalCell = studentPaymentStatusOnly ? "" : `<td>${escapeHtml(row.subtotal)}</td>`;
         return `<tr>
           <td>${escapeHtml(row.row_number)}</td>
           <td class="name">${escapeHtml(row.name)}</td>
@@ -1431,29 +1461,44 @@ export default function Reports() {
           <td class="name">${escapeHtml(row.class_name)}</td>
           ${months}
           ${catTotals}
-          <td>${escapeHtml(row.subtotal)}</td>
+          ${subtotalCell}
         </tr>`;
       })
       .join("");
-    const footerMonths = (studentPaymentList.summary?.month_totals || [])
-      .map((month) => {
-        const cats = categories
-          .map((category) => `<td>${escapeHtml(month.amounts?.[category.key] || "0.00")}</td>`)
-          .join("");
-        return `${cats}<td>${escapeHtml(month.month_total)}</td>`;
-      })
-      .join("");
-    const footerCats = categories
-      .map(
-        (category) =>
-          `<td>${escapeHtml(studentPaymentList.summary?.category_totals?.[category.key] || "0.00")}</td>`
-      )
-      .join("");
+    const footerRow = studentPaymentStatusOnly
+      ? ""
+      : (() => {
+          const footerMonths = (studentPaymentList.summary?.month_totals || [])
+            .map((month) => {
+              const cats = categories
+                .map((category) => `<td>${escapeHtml(month.amounts?.[category.key] || "0.00")}</td>`)
+                .join("");
+              return `${cats}<td>${escapeHtml(month.month_total)}</td>`;
+            })
+            .join("");
+          const footerCats = categories
+            .map(
+              (category) =>
+                `<td>${escapeHtml(studentPaymentList.summary?.category_totals?.[category.key] || "0.00")}</td>`
+            )
+            .join("");
+          return `<tfoot>
+              <tr>
+                <td colspan="5">مجموعه نهایی</td>
+                ${footerMonths}
+                ${footerCats}
+                <td>${escapeHtml(studentPaymentList.summary?.grand_total || "0.00")}</td>
+              </tr>
+            </tfoot>`;
+        })();
+    const reportTitle = studentPaymentStatusOnly
+      ? `وضعیت پرداخت شاگردان ${escapeHtml(template.schoolName || "")} سال ${escapeHtml(studentPaymentList.year_shamsi)} (✓ پرداخت شده / ✗ نپرداخته)`
+      : `لیست پرداخت‌های شاگردان ${escapeHtml(template.schoolName || "")} سال ${escapeHtml(studentPaymentList.year_shamsi)}`;
     const html = `
       <html>
         <head>
           <meta charset="utf-8" />
-          <title>لیست پرداخت شاگردان</title>
+          <title>${studentPaymentStatusOnly ? "وضعیت پرداخت شاگردان" : "لیست پرداخت شاگردان"}</title>
           <style>
             @page { size: A4 landscape; margin: 8mm; }
             body { font-family: Tahoma, "Segoe UI", sans-serif; direction: rtl; color: #0f172a; }
@@ -1462,11 +1507,13 @@ export default function Reports() {
             th, td { border: 1px solid #334155; padding: 2px 3px; text-align: center; }
             th { background: #e2e8f0; }
             td.name { text-align: right; }
+            td.paid { color: #166534; font-weight: 700; background: #dcfce7; }
+            td.unpaid { color: #991b1b; font-weight: 700; background: #fee2e2; }
             tfoot td { background: #f1f5f9; font-weight: 700; }
           </style>
         </head>
         <body>
-          <h1>لیست پرداخت‌های شاگردان ${escapeHtml(template.schoolName || "")} سال ${escapeHtml(studentPaymentList.year_shamsi)}</h1>
+          <h1>${reportTitle}</h1>
           <table>
             <thead>
               <tr>
@@ -1477,19 +1524,12 @@ export default function Reports() {
                 <th rowspan="2">صنف</th>
                 ${headMonths}
                 ${categoryTotalHeads}
-                <th rowspan="2">مجموعه شاگرد</th>
+                ${studentPaymentStatusOnly ? "" : '<th rowspan="2">مجموعه شاگرد</th>'}
               </tr>
               <tr>${subHeadMonths}</tr>
             </thead>
             <tbody>${bodyRows || '<tr><td colspan="20">موردی یافت نشد</td></tr>'}</tbody>
-            <tfoot>
-              <tr>
-                <td colspan="5">مجموعه نهایی</td>
-                ${footerMonths}
-                ${footerCats}
-                <td>${escapeHtml(studentPaymentList.summary?.grand_total || "0.00")}</td>
-              </tr>
-            </tfoot>
+            ${footerRow}
           </table>
         </body>
       </html>
@@ -1836,6 +1876,8 @@ export default function Reports() {
     lines.push(`Period,${filters.period}`);
     lines.push(`Total Revenue,${summary.total_revenue || 0}`);
     lines.push(`Total Expenses,${summary.total_expenses || 0}`);
+    lines.push(`Expense Records,${summary.expense_records_total || 0}`);
+    lines.push(`Teacher Salaries,${summary.teacher_salaries_total || 0}`);
     lines.push(`Profit,${summary.profit || 0}`);
     lines.push("");
     lines.push("Payments");
@@ -1862,6 +1904,20 @@ export default function Reports() {
           item.amount,
           item.date_shamsi,
           `"${String(item.paid_by || "").replaceAll('"', '""')}"`,
+        ].join(",")
+      );
+    });
+    lines.push("");
+    lines.push("Teacher Salaries");
+    lines.push("ID,Teacher,Department,Amount,Date");
+    (summary.teacher_salary_payments || []).forEach((item) => {
+      lines.push(
+        [
+          item.id,
+          `"${String(item.teacher_name || item.teacher || "").replaceAll('"', '""')}"`,
+          `"${String(item.teacher_department || "").replaceAll('"', '""')}"`,
+          item.amount,
+          item.date_shamsi,
         ].join(",")
       );
     });
@@ -1903,6 +1959,19 @@ export default function Reports() {
             <td>${item.amount}</td>
             <td>${item.date_shamsi}</td>
             <td>${item.paid_by || ""}</td>
+          </tr>
+        `
+      )
+      .join("");
+    const salaryRows = (summary.teacher_salary_payments || [])
+      .map(
+        (item) => `
+          <tr>
+            <td>${item.id}</td>
+            <td>${item.teacher_name || item.teacher || ""}</td>
+            <td>${item.teacher_department || ""}</td>
+            <td>${item.amount}</td>
+            <td>${item.date_shamsi}</td>
           </tr>
         `
       )
@@ -1952,6 +2021,8 @@ export default function Reports() {
             <div class="k"><div class="muted">Total Revenue</div><strong>${summary.total_revenue || 0}</strong></div>
             <div class="k"><div class="muted">Total Expenses</div><strong>${summary.total_expenses || 0}</strong></div>
             <div class="k"><div class="muted">Profit</div><strong>${summary.profit || 0}</strong></div>
+            <div class="k"><div class="muted">Expense Records</div><strong>${summary.expense_records_total || 0}</strong></div>
+            <div class="k"><div class="muted">Teacher Salaries</div><strong>${summary.teacher_salaries_total || 0}</strong></div>
           </div>
 
           <h3>Payments</h3>
@@ -1968,6 +2039,14 @@ export default function Reports() {
               <tr><th>ID</th><th>Category</th><th>Amount</th><th>Date</th><th>Paid By</th></tr>
             </thead>
             <tbody>${expensesRows || '<tr><td colspan="5">No expense data found.</td></tr>'}</tbody>
+          </table>
+
+          <h3>Teacher Salaries</h3>
+          <table>
+            <thead>
+              <tr><th>ID</th><th>Teacher</th><th>Department</th><th>Amount</th><th>Date</th></tr>
+            </thead>
+            <tbody>${salaryRows || '<tr><td colspan="5">No salary data found.</td></tr>'}</tbody>
           </table>
         </body>
       </html>
@@ -1995,7 +2074,7 @@ export default function Reports() {
                   : activeTab === "teacherStatement"
                     ? "A printable salary statement for one teacher, with monthly salary payouts and balance."
                   : activeTab === "teacherSalaryList"
-                    ? "Excel-style staff salary matrix for the year: months, 2% tax, and totals."
+                    ? "Excel-style staff salary matrix for the year: months and totals."
                   : activeTab === "studentPaymentList"
                     ? "Excel-style student payments by month for selected fee types, with student and grand totals."
                   : "Receipt appearance for printed bills."}
@@ -2250,9 +2329,11 @@ export default function Reports() {
       </div>
 
       <div className="stats-grid">
-        <StatCard label="Total Revenue" value={summary ? summary.total_revenue : "â€”"} />
-        <StatCard label="Total Expenses" value={summary ? summary.total_expenses : "â€”"} />
-        <StatCard label="Profit" value={summary ? summary.profit : "â€”"} />
+        <StatCard label="Total Revenue" value={summary ? summary.total_revenue : "—"} />
+        <StatCard label="Total Expenses" value={summary ? summary.total_expenses : "—"} />
+        <StatCard label="Teacher Salaries" value={summary ? summary.teacher_salaries_total ?? "—" : "—"} />
+        <StatCard label="Other Expenses" value={summary ? summary.expense_records_total ?? "—" : "—"} />
+        <StatCard label="Profit" value={summary ? summary.profit : "—"} />
       </div>
 
       {summary?.payments ? (
@@ -2307,6 +2388,34 @@ export default function Reports() {
             </div>
           ) : (
             <div className="muted-panel">No expense data found for this filter.</div>
+          )}
+        </div>
+      ) : null}
+
+      {summary?.teacher_salary_payments ? (
+        <div className="panel">
+          <h3>Teacher Salary Details</h3>
+          {summary.teacher_salary_payments.length > 0 ? (
+            <div className="table">
+              <div className="table-head">
+                <div>ID</div>
+                <div>Teacher</div>
+                <div>Department</div>
+                <div>Amount</div>
+                <div>Date</div>
+              </div>
+              {summary.teacher_salary_payments.map((payment) => (
+                <div className="table-row" key={payment.id}>
+                  <div>{payment.id}</div>
+                  <div>{payment.teacher_name || payment.teacher}</div>
+                  <div>{payment.teacher_department || "—"}</div>
+                  <div>{payment.amount}</div>
+                  <div>{payment.date_shamsi}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="muted-panel">No teacher salary data found for this filter.</div>
           )}
         </div>
       ) : null}
@@ -2965,8 +3074,8 @@ export default function Reports() {
           <div className="panel">
             <h3>Salary list options</h3>
             <p className="muted-panel" style={{ marginBottom: 12 }}>
-              Same layout as the Excel <strong>لیست معاشات</strong>: all teachers, each month salary + مالیه ۲٪
-              (0 under 5000, else 2% of amount above 5000). Unpaid months show <strong>//</strong>.
+              Same layout as the Excel <strong>لیست معاشات</strong>: all teachers and each month’s salary.
+              Unpaid months show <strong>//</strong>.
             </p>
             <div className="form-grid">
               <Field label="Shamsi Year (YYYY, optional)">
@@ -2988,7 +3097,6 @@ export default function Reports() {
                 <StatCard label="Year" value={teacherSalaryList.year_shamsi || "—"} />
                 <StatCard label="Teachers" value={teacherSalaryList.summary?.teachers_count || "—"} />
                 <StatCard label="Total Salaries" value={teacherSalaryList.summary?.total_salary || "—"} />
-                <StatCard label="Total Tax" value={teacherSalaryList.summary?.total_tax || "—"} />
               </div>
 
               <div className="panel">
@@ -2997,33 +3105,15 @@ export default function Reports() {
                   <table className="salary-sheet">
                     <thead>
                       <tr>
-                        <th className="sticky-col col-no" rowSpan={2}>
-                          شماره
-                        </th>
-                        <th className="sticky-col col-name" rowSpan={2}>
-                          اسم
-                        </th>
-                        <th className="sticky-col col-father" rowSpan={2}>
-                          ولد
-                        </th>
-                        <th className="sticky-col col-role" rowSpan={2}>
-                          وظیفه
-                        </th>
+                        <th className="sticky-col col-no">شماره</th>
+                        <th className="sticky-col col-name">اسم</th>
+                        <th className="sticky-col col-father">ولد</th>
+                        <th className="sticky-col col-role">وظیفه</th>
                         {(teacherSalaryList.month_labels || []).map((month) => (
-                          <th key={month.month_shamsi} colSpan={2}>
-                            {month.label}
-                          </th>
+                          <th key={month.month_shamsi}>{month.label}</th>
                         ))}
-                        <th rowSpan={2}>مجموعه ماه</th>
-                        <th rowSpan={2}>مجموعه معاش</th>
-                      </tr>
-                      <tr>
-                        {(teacherSalaryList.month_labels || []).map((month) => (
-                          <Fragment key={`sub-${month.month_shamsi}`}>
-                            <th>معاش</th>
-                            <th>مالیه ۲٪</th>
-                          </Fragment>
-                        ))}
+                        <th>مجموعه ماه</th>
+                        <th>مجموعه معاش</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3034,10 +3124,7 @@ export default function Reports() {
                           <td className="sticky-col col-father">{row.father_name}</td>
                           <td className="sticky-col col-role">{row.department}</td>
                           {(row.months || []).map((month) => (
-                            <Fragment key={`${row.teacher_id}-${month.month_shamsi}`}>
-                              <td>{month.paid_display}</td>
-                              <td>{month.tax_display}</td>
-                            </Fragment>
+                            <td key={`${row.teacher_id}-${month.month_shamsi}`}>{month.paid_display}</td>
                           ))}
                           <td>{row.months_paid_count}</td>
                           <td>{row.total_salary}</td>
@@ -3048,10 +3135,7 @@ export default function Reports() {
                       <tr>
                         <td colSpan={4}>مجموعه</td>
                         {(teacherSalaryList.summary?.month_totals || []).map((month) => (
-                          <Fragment key={`total-${month.month_shamsi}`}>
-                            <td>{month.salary}</td>
-                            <td>{month.tax}</td>
-                          </Fragment>
+                          <td key={`total-${month.month_shamsi}`}>{month.salary}</td>
                         ))}
                         <td></td>
                         <td>{teacherSalaryList.summary?.total_salary}</td>
@@ -3075,8 +3159,9 @@ export default function Reports() {
           <div className="panel">
             <h3>Student payment list options</h3>
             <p className="muted-panel" style={{ marginBottom: 12 }}>
-              Choose fee types (monthly, transport, uniform, book). The report shows each month from Hamal to Hoot,
-              amounts per selected type, student subtotal, and a final grand total. Empty months show <strong>//</strong>.
+              Choose fee types (monthly, transport, uniform, book). The report shows each month from Hamal to Hoot.
+              With amounts: paid cells show the value and empty months show <strong>//</strong>.
+              With status only: paid shows <strong>✓</strong> and unpaid shows <strong>✗</strong> (no amounts — good for teachers).
             </p>
             <div className="form-grid">
               <Field label="Shamsi Year (YYYY, optional)">
@@ -3129,6 +3214,16 @@ export default function Reports() {
                 ))}
               </div>
             </div>
+            <div style={{ marginTop: 14 }} className="category-checkboxes">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={studentPaymentStatusOnly}
+                  onChange={(event) => setStudentPaymentStatusOnly(event.target.checked)}
+                />
+                Status only for teachers (hide amounts — show ✓ / ✗)
+              </label>
+            </div>
             {loadingStudentPaymentList ? <div className="status-message">Generating payment list...</div> : null}
             {studentPaymentError ? <div className="form-error">{studentPaymentError}</div> : null}
           </div>
@@ -3138,7 +3233,11 @@ export default function Reports() {
               <div className="stats-grid">
                 <StatCard label="Year" value={studentPaymentList.year_shamsi || "—"} />
                 <StatCard label="Students" value={studentPaymentList.summary?.students_count || "—"} />
-                <StatCard label="Grand Total" value={studentPaymentList.summary?.grand_total || "—"} />
+                {studentPaymentStatusOnly ? (
+                  <StatCard label="View" value="✓ / ✗ status" />
+                ) : (
+                  <StatCard label="Grand Total" value={studentPaymentList.summary?.grand_total || "—"} />
+                )}
                 <StatCard
                   label="Categories"
                   value={(studentPaymentList.categories || []).map((item) => item.label).join("، ") || "—"}
@@ -3146,7 +3245,11 @@ export default function Reports() {
               </div>
 
               <div className="panel">
-                <h3>لیست پرداخت‌های شاگردان — سال {studentPaymentList.year_shamsi}</h3>
+                <h3>
+                  {studentPaymentStatusOnly ? "وضعیت پرداخت شاگردان" : "لیست پرداخت‌های شاگردان"} — سال{" "}
+                  {studentPaymentList.year_shamsi}
+                  {studentPaymentStatusOnly ? " (✓ پرداخت شده / ✗ نپرداخته)" : ""}
+                </h3>
                 <div className="salary-sheet-wrap">
                   <table className="salary-sheet">
                     <thead>
@@ -3157,16 +3260,23 @@ export default function Reports() {
                         <th rowSpan={2}>ولد</th>
                         <th rowSpan={2}>صنف</th>
                         {(studentPaymentList.month_labels || []).map((month) => (
-                          <th key={month.month_shamsi} colSpan={(studentPaymentList.categories || []).length + 1}>
+                          <th
+                            key={month.month_shamsi}
+                            colSpan={
+                              (studentPaymentList.categories || []).length + (studentPaymentStatusOnly ? 0 : 1)
+                            }
+                          >
                             {month.label}
                           </th>
                         ))}
-                        {(studentPaymentList.categories || []).map((category) => (
-                          <th key={`total-head-${category.key}`} rowSpan={2}>
-                            مجموعه {category.label}
-                          </th>
-                        ))}
-                        <th rowSpan={2}>مجموعه شاگرد</th>
+                        {!studentPaymentStatusOnly
+                          ? (studentPaymentList.categories || []).map((category) => (
+                              <th key={`total-head-${category.key}`} rowSpan={2}>
+                                مجموعه {category.label}
+                              </th>
+                            ))
+                          : null}
+                        {!studentPaymentStatusOnly ? <th rowSpan={2}>مجموعه شاگرد</th> : null}
                       </tr>
                       <tr>
                         {(studentPaymentList.month_labels || []).map((month) => (
@@ -3174,7 +3284,7 @@ export default function Reports() {
                             {(studentPaymentList.categories || []).map((category) => (
                               <th key={`${month.month_shamsi}-${category.key}`}>{category.label}</th>
                             ))}
-                            <th>جمع ماه</th>
+                            {!studentPaymentStatusOnly ? <th>جمع ماه</th> : null}
                           </Fragment>
                         ))}
                       </tr>
@@ -3189,44 +3299,61 @@ export default function Reports() {
                           <td>{row.class_name}</td>
                           {(row.months || []).map((month) => (
                             <Fragment key={`${row.student_id}-${month.month_shamsi}`}>
+                              {(studentPaymentList.categories || []).map((category) => {
+                                const value = studentPaymentCellValue(month, category.key);
+                                const paid = isStudentCategoryPaid(month, category.key);
+                                return (
+                                  <td
+                                    key={`${month.month_shamsi}-${category.key}`}
+                                    className={
+                                      studentPaymentStatusOnly
+                                        ? paid
+                                          ? "pay-status-ok"
+                                          : "pay-status-no"
+                                        : undefined
+                                    }
+                                  >
+                                    {value}
+                                  </td>
+                                );
+                              })}
+                              {!studentPaymentStatusOnly ? <td>{month.month_total}</td> : null}
+                            </Fragment>
+                          ))}
+                          {!studentPaymentStatusOnly
+                            ? (studentPaymentList.categories || []).map((category) => (
+                                <td key={`ct-${row.student_id}-${category.key}`}>
+                                  {row.category_totals?.[category.key] || "0.00"}
+                                </td>
+                              ))
+                            : null}
+                          {!studentPaymentStatusOnly ? <td>{row.subtotal}</td> : null}
+                        </tr>
+                      ))}
+                    </tbody>
+                    {!studentPaymentStatusOnly ? (
+                      <tfoot>
+                        <tr>
+                          <td colSpan={5}>مجموعه نهایی</td>
+                          {(studentPaymentList.summary?.month_totals || []).map((month) => (
+                            <Fragment key={`ft-${month.month_shamsi}`}>
                               {(studentPaymentList.categories || []).map((category) => (
-                                <td key={`${month.month_shamsi}-${category.key}`}>
-                                  {month.displays?.[category.key] || "//"}
+                                <td key={`ft-${month.month_shamsi}-${category.key}`}>
+                                  {month.amounts?.[category.key] || "0.00"}
                                 </td>
                               ))}
                               <td>{month.month_total}</td>
                             </Fragment>
                           ))}
                           {(studentPaymentList.categories || []).map((category) => (
-                            <td key={`ct-${row.student_id}-${category.key}`}>
-                              {row.category_totals?.[category.key] || "0.00"}
+                            <td key={`fct-${category.key}`}>
+                              {studentPaymentList.summary?.category_totals?.[category.key] || "0.00"}
                             </td>
                           ))}
-                          <td>{row.subtotal}</td>
+                          <td>{studentPaymentList.summary?.grand_total}</td>
                         </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr>
-                        <td colSpan={5}>مجموعه نهایی</td>
-                        {(studentPaymentList.summary?.month_totals || []).map((month) => (
-                          <Fragment key={`ft-${month.month_shamsi}`}>
-                            {(studentPaymentList.categories || []).map((category) => (
-                              <td key={`ft-${month.month_shamsi}-${category.key}`}>
-                                {month.amounts?.[category.key] || "0.00"}
-                              </td>
-                            ))}
-                            <td>{month.month_total}</td>
-                          </Fragment>
-                        ))}
-                        {(studentPaymentList.categories || []).map((category) => (
-                          <td key={`fct-${category.key}`}>
-                            {studentPaymentList.summary?.category_totals?.[category.key] || "0.00"}
-                          </td>
-                        ))}
-                        <td>{studentPaymentList.summary?.grand_total}</td>
-                      </tr>
-                    </tfoot>
+                      </tfoot>
+                    ) : null}
                   </table>
                 </div>
                 {!studentPaymentList.rows?.length ? (

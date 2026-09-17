@@ -519,6 +519,47 @@ class TestCoreSmokeTests(APITestCase):
         self.assertEqual(blocked.status_code, 400, blocked.data)
         self.assertIn("date_shamsi", blocked.data)
 
+    def test_report_summary_includes_teacher_salaries_in_expenses(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+        Payment.objects.create(
+            student=self.student,
+            fee_type=self.fee_type,
+            bill_number="55555",
+            amount=Decimal("1000.00"),
+            date_shamsi=jdatetime.date(1405, 2, 10),
+        )
+        category = ExpenseCategory.objects.create(name="Utilities")
+        Expense.objects.create(
+            category=category,
+            amount=Decimal("400.00"),
+            date_shamsi=jdatetime.date(1405, 2, 12),
+            paid_by="Admin",
+        )
+        teacher = Teacher.objects.create(
+            name="Ahmad",
+            father_name="Karim",
+            phone="700111222",
+            email="a@example.com",
+            address="Kabul",
+            salary=Decimal("5000.00"),
+            department="Teacher",
+        )
+        TeacherSalaryPayment.objects.create(
+            teacher=teacher,
+            amount=Decimal("5000.00"),
+            date_shamsi=jdatetime.date(1405, 2, 5),
+        )
+
+        res = self.client.get("/api/reports/summary/?period=month&date=1405-02&include_items=1")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(Decimal(str(res.data["total_revenue"])), Decimal("1000.00"))
+        self.assertEqual(Decimal(str(res.data["expense_records_total"])), Decimal("400.00"))
+        self.assertEqual(Decimal(str(res.data["teacher_salaries_total"])), Decimal("5000.00"))
+        self.assertEqual(Decimal(str(res.data["total_expenses"])), Decimal("5400.00"))
+        self.assertEqual(Decimal(str(res.data["profit"])), Decimal("-4400.00"))
+        self.assertEqual(len(res.data["teacher_salary_payments"]), 1)
+        self.assertEqual(res.data["teacher_salary_payments"][0]["teacher_name"], "Ahmad")
+
     def test_expense_category_statement_report(self):
         self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
         category = ExpenseCategory.objects.create(name="Utilities")
@@ -624,9 +665,7 @@ class TestCoreSmokeTests(APITestCase):
         self.assertEqual(row["father_name"], "عبدالغفار")
         self.assertEqual(row["department"], "سرمعلم")
         self.assertEqual(row["months"][0]["paid_display"], "11000.00")
-        self.assertEqual(row["months"][0]["tax_display"], "120")  # (11000-5000)*2%
         self.assertEqual(row["months"][1]["paid_display"], "4000.00")
-        self.assertEqual(row["months"][1]["tax_display"], "0")
         self.assertEqual(row["months"][2]["paid_display"], "//")
         self.assertEqual(row["total_salary"], "15000.00")
         self.assertEqual(row["months_paid_count"], 2)
