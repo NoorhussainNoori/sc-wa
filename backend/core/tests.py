@@ -529,6 +529,9 @@ class TestCoreSmokeTests(APITestCase):
             date_shamsi=jdatetime.date(1404, 1, 10),
             paid_by="Admin",
             description="Electricity",
+            quantity="1",
+            bill_number="810",
+            notes="State bill",
         )
         Expense.objects.create(
             category=category,
@@ -536,6 +539,16 @@ class TestCoreSmokeTests(APITestCase):
             date_shamsi=jdatetime.date(1404, 1, 18),
             paid_by="Admin",
             description="Water",
+            bill_number="220",
+        )
+        Expense.objects.create(
+            category=category,
+            amount=Decimal("500.00"),
+            date_shamsi=jdatetime.date(1404, 1, 22),
+            paid_by="Admin",
+            description="Electricity",
+            bill_number="1379",
+            notes="Extra meter",
         )
         Expense.objects.create(
             category=other_category,
@@ -550,11 +563,34 @@ class TestCoreSmokeTests(APITestCase):
         )
         self.assertEqual(res.status_code, 200, res.data)
         self.assertEqual(res.data["category"]["id"], category.id)
-        self.assertEqual(res.data["summary"]["total_amount"], "2000.00")
-        self.assertEqual(res.data["summary"]["expenses_count"], 2)
-        self.assertEqual(len(res.data["expenses"]), 2)
-        self.assertEqual(res.data["expenses"][0]["description"], "Electricity")
-        self.assertEqual(res.data["expenses"][1]["description"], "Water")
+        self.assertFalse(res.data["filters"]["all_categories"])
+        self.assertEqual(res.data["summary"]["total_amount"], "2500.00")
+        self.assertEqual(res.data["summary"]["expenses_count"], 3)
+        self.assertEqual(res.data["summary"]["items_count"], 2)
+        self.assertEqual(res.data["summary"]["categories_count"], 1)
+        self.assertEqual(len(res.data["sections"]), 1)
+        self.assertEqual(len(res.data["expenses"]), 3)
+        self.assertEqual(len(res.data["items"]), 2)
+
+        electricity = next(item for item in res.data["items"] if item["item_name"] == "Electricity")
+        water = next(item for item in res.data["items"] if item["item_name"] == "Water")
+        self.assertEqual(electricity["amount"], "1700.00")
+        self.assertEqual(electricity["bill_number"], "810/1379")
+        self.assertEqual(electricity["quantity"], "1")
+        self.assertIn("State bill", electricity["notes"])
+        self.assertEqual(water["bill_number"], "220")
+        self.assertEqual(water["amount"], "800.00")
+
+        all_res = self.client.get("/api/reports/expense-statement/?start=1404-01-01&end=1404-01-30")
+        self.assertEqual(all_res.status_code, 200, all_res.data)
+        self.assertTrue(all_res.data["filters"]["all_categories"])
+        self.assertIsNone(all_res.data["category"])
+        self.assertEqual(all_res.data["summary"]["total_amount"], "3499.00")
+        self.assertEqual(all_res.data["summary"]["expenses_count"], 4)
+        self.assertEqual(all_res.data["summary"]["categories_count"], 2)
+        self.assertEqual(len(all_res.data["sections"]), 2)
+        section_names = {section["category"]["name"] for section in all_res.data["sections"]}
+        self.assertEqual(section_names, {"Utilities", "Supplies"})
 
 
 class BackupFixtureRepairTests(TestCase):

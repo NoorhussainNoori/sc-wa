@@ -209,6 +209,9 @@ class Expense(models.Model):
     date_shamsi = jmodels.jDateField()
     paid_by = models.CharField(max_length=120)
     description = models.CharField(max_length=255, blank=True)
+    quantity = models.CharField(max_length=60, blank=True, default="")
+    bill_number = models.CharField(max_length=60, blank=True, default="")
+    notes = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self) -> str:

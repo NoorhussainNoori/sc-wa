@@ -9,6 +9,9 @@ const emptyExpense = {
   date_shamsi: "",
   paid_by: "",
   description: "",
+  quantity: "",
+  bill_number: "",
+  notes: "",
 };
 
 export default function Expenses() {
@@ -158,6 +161,9 @@ export default function Expenses() {
       date_shamsi: expense.date_shamsi || "",
       paid_by: expense.paid_by || "",
       description: expense.description || "",
+      quantity: expense.quantity || "",
+      bill_number: expense.bill_number || "",
+      notes: expense.notes || "",
     });
   };
 
@@ -177,6 +183,10 @@ export default function Expenses() {
   };
 
   const activeCategories = categories.filter((category) => category.is_active !== false);
+  const expenseListGridStyle = {
+    gridTemplateColumns: "56px minmax(110px, 1fr) 90px 100px 90px minmax(110px, 1.2fr) 80px 90px minmax(100px, 1fr) 140px",
+    minWidth: "1080px",
+  };
 
   return (
     <div className="page">
@@ -224,8 +234,40 @@ export default function Expenses() {
                   ))}
                 </select>
               </Field>
+              <Field label="Item / Description (اسم جنس)">
+                <input
+                  className="input"
+                  value={form.description}
+                  onChange={onChange("description")}
+                  placeholder="e.g. تیل برای جنریتور"
+                />
+              </Field>
+              <Field label="Quantity (تعداد)">
+                <input
+                  className="input"
+                  value={form.quantity}
+                  onChange={onChange("quantity")}
+                  placeholder="Optional"
+                />
+              </Field>
               <Field label="Amount">
                 <input className="input" value={form.amount} onChange={onChange("amount")} required />
+              </Field>
+              <Field label="Bill Number (نمبر بل)">
+                <input
+                  className="input"
+                  value={form.bill_number}
+                  onChange={onChange("bill_number")}
+                  placeholder="e.g. 810"
+                />
+              </Field>
+              <Field label="Notes (ملاحظات)">
+                <input
+                  className="input"
+                  value={form.notes}
+                  onChange={onChange("notes")}
+                  placeholder="Optional notes"
+                />
               </Field>
               <Field label="Shamsi Date (YYYY-MM-DD)">
                 <input
@@ -238,14 +280,6 @@ export default function Expenses() {
               </Field>
               <Field label="Paid By">
                 <input className="input" value={form.paid_by} onChange={onChange("paid_by")} required />
-              </Field>
-              <Field label="Description">
-                <input
-                  className="input"
-                  value={form.description}
-                  onChange={onChange("description")}
-                  placeholder="Optional details"
-                />
               </Field>
               <button className="button button-primary" type="submit" disabled={savingExpense}>
                 {savingExpense ? "Saving..." : editingExpenseId ? "Update Expense" : "Save Expense"}
@@ -274,37 +308,45 @@ export default function Expenses() {
 
           <div className="panel">
             <h3>Expense List</h3>
-            <div className="table">
-              <div className="table-head">
-                <div>ID</div>
-                <div>Category</div>
-                <div>Amount</div>
-                <div>Date</div>
-                <div>Paid By</div>
-                <div>Description</div>
-                <div>Actions</div>
-              </div>
-              {expenses.map((expense) => {
-                const categoryEntry = categories.find((cat) => cat.id === expense.category);
-                return (
-                  <div className="table-row" key={expense.id}>
-                    <div>{expense.id}</div>
-                    <div>{categoryEntry ? categoryEntry.name : expense.category_name || expense.category}</div>
-                    <div>{expense.amount}</div>
-                    <div>{expense.date_shamsi}</div>
-                    <div>{expense.paid_by}</div>
-                    <div>{expense.description || "—"}</div>
-                    <div className="inline-actions">
-                      <button className="button button-outline" type="button" onClick={() => onEditExpense(expense)}>
-                        Edit
-                      </button>
-                      <button className="button button-outline" type="button" onClick={() => onDeleteExpense(expense)}>
-                        Delete
-                      </button>
+            <div style={{ overflowX: "auto" }}>
+              <div className="table" style={expenseListGridStyle}>
+                <div className="table-head" style={expenseListGridStyle}>
+                  <div>ID</div>
+                  <div>Category</div>
+                  <div>Amount</div>
+                  <div>Date</div>
+                  <div>Qty</div>
+                  <div>Item</div>
+                  <div>Bill #</div>
+                  <div>Paid By</div>
+                  <div>Notes</div>
+                  <div>Actions</div>
+                </div>
+                {expenses.map((expense) => {
+                  const categoryEntry = categories.find((cat) => cat.id === expense.category);
+                  return (
+                    <div className="table-row" key={expense.id} style={expenseListGridStyle}>
+                      <div>{expense.id}</div>
+                      <div>{categoryEntry ? categoryEntry.name : expense.category_name || expense.category}</div>
+                      <div>{expense.amount}</div>
+                      <div>{expense.date_shamsi}</div>
+                      <div>{expense.quantity || "—"}</div>
+                      <div>{expense.description || "—"}</div>
+                      <div>{expense.bill_number || "—"}</div>
+                      <div>{expense.paid_by}</div>
+                      <div>{expense.notes || "—"}</div>
+                      <div className="inline-actions">
+                        <button className="button button-outline" type="button" onClick={() => onEditExpense(expense)}>
+                          Edit
+                        </button>
+                        <button className="button button-outline" type="button" onClick={() => onDeleteExpense(expense)}>
+                          Delete
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
             {!loadingExpenses && expenses.length === 0 ? (
               <div className="muted-panel" style={{ marginTop: 12 }}>
@@ -391,4 +433,3 @@ export default function Expenses() {
     </div>
   );
 }
-

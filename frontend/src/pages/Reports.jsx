@@ -72,6 +72,7 @@ export default function Reports() {
   const [expenseStatement, setExpenseStatement] = useState(null);
   const [expenseStatementError, setExpenseStatementError] = useState("");
   const [loadingExpenseStatement, setLoadingExpenseStatement] = useState(false);
+  const [exportingExpenseExcel, setExportingExpenseExcel] = useState(false);
 
   const classFeesGridStyle = {
     gridTemplateColumns: "minmax(160px, 1.5fr) 70px repeat(8, minmax(88px, 1fr)) 56px",
@@ -256,21 +257,23 @@ export default function Reports() {
   };
 
   const loadExpenseStatement = async () => {
-    if (!selectedExpenseCategoryId) {
-      setExpenseStatementError("Select an expense category first.");
-      return;
-    }
     setExpenseStatementError("");
     setLoadingExpenseStatement(true);
     try {
-      const params = new URLSearchParams({
-        category_id: String(selectedExpenseCategoryId),
-      });
+      const params = new URLSearchParams();
+      if (selectedExpenseCategoryId) {
+        params.set("category_id", String(selectedExpenseCategoryId));
+      }
       if (expenseStatementStart && expenseStatementEnd) {
         params.set("start", expenseStatementStart);
         params.set("end", expenseStatementEnd);
+      } else if (expenseStatementStart || expenseStatementEnd) {
+        setExpenseStatementError("Enter both start and end dates, or leave both blank.");
+        setLoadingExpenseStatement(false);
+        return;
       }
-      const data = await apiFetch(`/reports/expense-statement/?${params.toString()}`);
+      const query = params.toString();
+      const data = await apiFetch(`/reports/expense-statement/${query ? `?${query}` : ""}`);
       setExpenseStatement(data);
     } catch (err) {
       setExpenseStatementError(err.message || "Failed to load expense statement.");
@@ -880,106 +883,276 @@ export default function Reports() {
     reportWindow.print();
   };
 
-  const exportExpenseStatementCsv = () => {
+  const exportExpenseStatementExcel = async () => {
     if (!expenseStatement) return;
-    const lines = [];
-    lines.push(`Category,${csvSafe(expenseStatement.category?.name)}`);
-    lines.push(`Start,${csvSafe(expenseStatement.filters?.start)}`);
-    lines.push(`End,${csvSafe(expenseStatement.filters?.end)}`);
-    lines.push(`Total Amount,${csvSafe(expenseStatement.summary?.total_amount)}`);
-    lines.push(`Expenses Count,${csvSafe(expenseStatement.summary?.expenses_count)}`);
-    lines.push("");
-    lines.push("Expenses");
-    lines.push("ID,Date,Amount,Paid By,Description");
-    (expenseStatement.expenses || []).forEach((item) => {
-      lines.push(
-        [
-          item.id,
-          csvSafe(item.date_shamsi),
-          csvSafe(item.amount),
-          csvSafe(item.paid_by),
-          csvSafe(item.description || ""),
-        ].join(",")
-      );
-    });
-    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `expense_statement_${expenseStatement.category?.name || "category"}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    setExportingExpenseExcel(true);
+    try {
+      const ExcelJS = (await import("exceljs")).default;
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = template.schoolName || "School Finance";
+      workbook.created = new Date();
+
+      const sheet = workbook.addWorksheet("مصارف", {
+        views: [{ rightToLeft: true, state: "frozen", ySplit: 5 }],
+      });
+
+      const thinBorder = {
+        top: { style: "thin", color: { argb: "FF334155" } },
+        left: { style: "thin", color: { argb: "FF334155" } },
+        bottom: { style: "thin", color: { argb: "FF334155" } },
+        right: { style: "thin", color: { argb: "FF334155" } },
+      };
+      const headerFill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE2E8F0" },
+      };
+      const totalFill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFF1F5F9" },
+      };
+      const titleFill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFDBEAFE" },
+      };
+
+      const applyRangeBorder = (rowNumber, fromCol, toCol) => {
+        const row = sheet.getRow(rowNumber);
+        for (let col = fromCol; col <= toCol; col += 1) {
+          row.getCell(col).border = thinBorder;
+          row.getCell(col).alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+        }
+      };
+
+      sheet.columns = [
+        { key: "no", width: 10 },
+        { key: "item", width: 32 },
+        { key: "qty", width: 12 },
+        { key: "amount", width: 14 },
+        { key: "bill", width: 16 },
+        { key: "notes", width: 28 },
+      ];
+
+      const categoryLabel = expenseStatement.filters?.all_categories
+        ? "همه کتگوری‌ها"
+        : expenseStatement.category?.name || "مصارف";
+
+      sheet.mergeCells(1, 1, 1, 6);
+      const titleCell = sheet.getCell(1, 1);
+      titleCell.value = `${template.schoolName || "لیسه خصوصی وطن"} — راپور مصارف`;
+      titleCell.font = { bold: true, size: 14, color: { argb: "FF0F172A" } };
+      titleCell.alignment = { horizontal: "center", vertical: "middle" };
+      titleCell.fill = titleFill;
+      applyRangeBorder(1, 1, 6);
+      sheet.getRow(1).height = 24;
+
+      sheet.getCell(2, 1).value = "کتگوری";
+      sheet.getCell(2, 2).value = categoryLabel;
+      sheet.mergeCells(2, 2, 2, 6);
+      sheet.getCell(3, 1).value = "از تاریخ";
+      sheet.getCell(3, 2).value = expenseStatement.filters?.start || "همه";
+      sheet.mergeCells(3, 2, 3, 6);
+      sheet.getCell(4, 1).value = "تا تاریخ";
+      sheet.getCell(4, 2).value = expenseStatement.filters?.end || "همه";
+      sheet.mergeCells(4, 2, 4, 6);
+      sheet.getCell(5, 1).value = "مجموعه مصارف";
+      sheet.getCell(5, 2).value = Number(expenseStatement.summary?.total_amount || 0);
+      sheet.getCell(5, 2).numFmt = "#,##0.00";
+      sheet.mergeCells(5, 2, 5, 6);
+
+      for (let r = 2; r <= 5; r += 1) {
+        sheet.getCell(r, 1).font = { bold: true };
+        sheet.getCell(r, 1).fill = headerFill;
+        applyRangeBorder(r, 1, 6);
+        sheet.getCell(r, 2).alignment = { horizontal: "right", vertical: "middle" };
+      }
+
+      let rowNum = 7;
+      const headers = ["شماره", "اسم جنس", "تعداد", "مقدار مصرف", "نمبر بل", "ملاحظات"];
+
+      (expenseStatement.sections || []).forEach((section) => {
+        sheet.mergeCells(rowNum, 1, rowNum, 6);
+        const sectionCell = sheet.getCell(rowNum, 1);
+        sectionCell.value = section.category?.name || "";
+        sectionCell.font = { bold: true, size: 12 };
+        sectionCell.fill = titleFill;
+        sectionCell.alignment = { horizontal: "center", vertical: "middle" };
+        applyRangeBorder(rowNum, 1, 6);
+        sheet.getRow(rowNum).height = 22;
+        rowNum += 1;
+
+        headers.forEach((label, index) => {
+          const cell = sheet.getCell(rowNum, index + 1);
+          cell.value = label;
+          cell.font = { bold: true };
+          cell.fill = headerFill;
+        });
+        applyRangeBorder(rowNum, 1, 6);
+        rowNum += 1;
+
+        (section.items || []).forEach((item) => {
+          sheet.getCell(rowNum, 1).value = item.row_number;
+          sheet.getCell(rowNum, 2).value = item.item_name || "";
+          sheet.getCell(rowNum, 3).value = item.quantity || "";
+          const amountNum = Number(item.amount);
+          sheet.getCell(rowNum, 4).value = Number.isFinite(amountNum) ? amountNum : item.amount || 0;
+          sheet.getCell(rowNum, 4).numFmt = "#,##0.00";
+          sheet.getCell(rowNum, 5).value = item.bill_number || "";
+          sheet.getCell(rowNum, 6).value = item.notes || "";
+          applyRangeBorder(rowNum, 1, 6);
+          sheet.getCell(rowNum, 2).alignment = { horizontal: "right", vertical: "middle", wrapText: true };
+          sheet.getCell(rowNum, 6).alignment = { horizontal: "right", vertical: "middle", wrapText: true };
+          rowNum += 1;
+        });
+
+        sheet.getCell(rowNum, 1).value = "";
+        sheet.getCell(rowNum, 2).value = "جمله شد بل";
+        sheet.getCell(rowNum, 3).value = "";
+        const sectionTotal = Number(section.summary?.total_amount || 0);
+        sheet.getCell(rowNum, 4).value = sectionTotal;
+        sheet.getCell(rowNum, 4).numFmt = "#,##0.00";
+        sheet.getCell(rowNum, 5).value = "";
+        sheet.getCell(rowNum, 6).value = "";
+        for (let col = 1; col <= 6; col += 1) {
+          sheet.getCell(rowNum, col).font = { bold: true };
+          sheet.getCell(rowNum, col).fill = totalFill;
+        }
+        applyRangeBorder(rowNum, 1, 6);
+        sheet.getCell(rowNum, 2).alignment = { horizontal: "right", vertical: "middle" };
+        rowNum += 2;
+      });
+
+      if ((expenseStatement.sections || []).length > 1) {
+        sheet.mergeCells(rowNum, 1, rowNum, 3);
+        sheet.getCell(rowNum, 1).value = "مجموعه کل";
+        sheet.getCell(rowNum, 1).font = { bold: true, size: 12 };
+        sheet.getCell(rowNum, 4).value = Number(expenseStatement.summary?.total_amount || 0);
+        sheet.getCell(rowNum, 4).numFmt = "#,##0.00";
+        sheet.getCell(rowNum, 4).font = { bold: true, size: 12 };
+        for (let col = 1; col <= 6; col += 1) {
+          sheet.getCell(rowNum, col).fill = totalFill;
+        }
+        applyRangeBorder(rowNum, 1, 6);
+      }
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safeName = String(categoryLabel).replace(/[\\/:*?"<>|]+/g, "_").replace(/\s+/g, "_");
+      const start = expenseStatement.filters?.start || "all";
+      const end = expenseStatement.filters?.end || "all";
+      a.download = `expense_report_${safeName}_${start}_${end}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExpenseStatementError(err.message || "Failed to export Excel file.");
+    } finally {
+      setExportingExpenseExcel(false);
+    }
   };
 
   const printExpenseStatement = () => {
     if (!expenseStatement) return;
     const reportWindow = window.open("", "_blank", "width=1100,height=900");
     if (!reportWindow) return;
-    const expenseRows = (expenseStatement.expenses || [])
-      .map(
-        (item) => `
-          <tr>
-            <td>${escapeHtml(item.date_shamsi)}</td>
-            <td>${escapeHtml(item.amount)}</td>
-            <td>${escapeHtml(item.paid_by)}</td>
-            <td>${escapeHtml(item.description || "")}</td>
-          </tr>
-        `
-      )
+    const sectionHtml = (expenseStatement.sections || [])
+      .map((section) => {
+        const itemRows = (section.items || [])
+          .map(
+            (item) => `
+              <tr>
+                <td>${escapeHtml(item.row_number)}</td>
+                <td class="item">${escapeHtml(item.item_name || "")}</td>
+                <td>${escapeHtml(item.quantity || "")}</td>
+                <td>${escapeHtml(item.amount)}</td>
+                <td>${escapeHtml(item.bill_number || "")}</td>
+                <td class="notes">${escapeHtml(item.notes || "")}</td>
+              </tr>
+            `
+          )
+          .join("");
+        return `
+          <section class="block">
+            <h2>${escapeHtml(section.category?.name || "")}</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>شماره</th>
+                  <th>اسم جنس</th>
+                  <th>تعداد</th>
+                  <th>مقدار مصرف</th>
+                  <th>نمبر بل</th>
+                  <th>ملاحظات</th>
+                </tr>
+              </thead>
+              <tbody>${itemRows || '<tr><td colspan="6">موردی یافت نشد</td></tr>'}</tbody>
+              <tfoot>
+                <tr>
+                  <td></td>
+                  <td class="item">جمله شد بل</td>
+                  <td></td>
+                  <td>${escapeHtml(section.summary?.total_amount || "0.00")}</td>
+                  <td></td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </section>
+        `;
+      })
       .join("");
+    const title = expenseStatement.filters?.all_categories
+      ? "راپور مصارف (همه کتگوری‌ها)"
+      : expenseStatement.category?.name || "راپور مصارف";
     const html = `
       <html>
         <head>
           <meta charset="utf-8" />
-          <title>Expense Statement</title>
+          <title>${escapeHtml(title)}</title>
           <style>
-            body { font-family: "Segoe UI", Arial, sans-serif; color: #0f172a; padding: 24px; }
-            h1 { margin: 0; font-size: 1.4rem; }
-            .muted { color: #64748b; font-size: 0.9rem; }
-            .head { display:flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 16px; }
-            .summary { display:grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 14px 0 18px; }
-            .summary-card { border:1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; }
-            .summary-card .label { color:#64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-            .summary-card .value { font-size: 16px; font-weight: 700; margin-top: 4px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
-            th, td { border:1px solid #e2e8f0; padding: 8px; vertical-align: top; }
-            th { background:#f8fafc; text-align:left; }
-            .signature { display:flex; justify-content: space-between; gap: 16px; margin-top: 44px; }
-            .sig-box { width: 32%; border-top: 1px solid #0f172a; padding-top: 8px; min-height: 44px; font-size: 12px; }
+            @page { size: A4; margin: 12mm; }
+            body { font-family: "Segoe UI", Tahoma, "Noto Naskh Arabic", Arial, sans-serif; color: #0f172a; padding: 8px; direction: rtl; }
+            h1 { margin: 0 0 4px; font-size: 1.25rem; }
+            h2 { margin: 0 0 8px; font-size: 1.05rem; }
+            .muted { color: #475569; font-size: 0.88rem; }
+            .head { display:flex; justify-content: space-between; gap: 16px; margin-bottom: 14px; border-bottom: 2px solid #334155; padding-bottom: 10px; }
+            .block { margin-bottom: 22px; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th, td { border: 1px solid #334155; padding: 7px 8px; text-align: center; }
+            th { background: #e2e8f0; font-weight: 700; }
+            td.item, td.notes { text-align: right; }
+            tfoot td { background: #f1f5f9; font-weight: 700; }
+            .grand { margin-top: 10px; border: 1px solid #334155; padding: 10px; font-weight: 700; background: #f8fafc; }
+            .signature { display:flex; justify-content: space-between; gap: 16px; margin-top: 40px; }
+            .sig-box { width: 30%; border-top: 1px solid #0f172a; padding-top: 8px; font-size: 12px; }
           </style>
         </head>
         <body>
           <div class="head">
             <div>
-              <h1>Expense Category Statement</h1>
-              <div class="muted">${escapeHtml(expenseStatement.category?.name || "")}</div>
+              <h1>${escapeHtml(title)}</h1>
+              <div class="muted">${escapeHtml(template.schoolName || "")}</div>
             </div>
-            <div style="text-align:right">
-              <div class="muted">Start: ${escapeHtml(expenseStatement.filters?.start || "All")}</div>
-              <div class="muted">End: ${escapeHtml(expenseStatement.filters?.end || "All")}</div>
+            <div>
+              <div class="muted">از: ${escapeHtml(expenseStatement.filters?.start || "همه")}</div>
+              <div class="muted">تا: ${escapeHtml(expenseStatement.filters?.end || "همه")}</div>
+              <div class="muted">مجموعه: ${escapeHtml(expenseStatement.summary?.total_amount || "0.00")}</div>
             </div>
           </div>
-          <div class="summary">
-            <div class="summary-card"><div class="label">Total Amount</div><div class="value">${escapeHtml(expenseStatement.summary?.total_amount || "0.00")}</div></div>
-            <div class="summary-card"><div class="label">Expenses Count</div><div class="value">${escapeHtml(expenseStatement.summary?.expenses_count || 0)}</div></div>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Amount</th>
-                <th>Paid By</th>
-                <th>Description</th>
-              </tr>
-            </thead>
-            <tbody>${expenseRows || '<tr><td colspan="4">No expense rows found.</td></tr>'}</tbody>
-          </table>
+          ${sectionHtml || "<p>موردی یافت نشد</p>"}
+          ${(expenseStatement.sections || []).length > 1 ? `<div class="grand">مجموعه کل: ${escapeHtml(expenseStatement.summary?.total_amount || "0.00")}</div>` : ""}
           <div class="signature">
-            <div class="sig-box">Prepared By</div>
-            <div class="sig-box">Accounts / Finance</div>
-            <div class="sig-box">Authorized Signature and Stamp</div>
+            <div class="sig-box">آماده‌کننده</div>
+            <div class="sig-box">حسابداری / مالی</div>
+            <div class="sig-box">امضا و مهر</div>
           </div>
         </body>
       </html>
@@ -1201,7 +1374,7 @@ export default function Reports() {
                 : activeTab === "studentStatement"
                   ? "A printable statement for one student, with payments, fees, and balances."
                   : activeTab === "expenseStatement"
-                    ? "A printable statement for one expense category, with total amount and expense ledger."
+                    ? "Excel-style expense category report: item, quantity, amount, bill number, and notes."
                   : activeTab === "teacherStatement"
                     ? "A printable salary statement for one teacher, with monthly salary payouts and balance."
                   : "Receipt appearance for printed bills."}
@@ -1319,8 +1492,13 @@ export default function Reports() {
 
       {activeTab === "expenseStatement" && expenseStatement ? (
         <div className="inline-actions">
-          <button className="button button-outline" type="button" onClick={exportExpenseStatementCsv}>
-            Export CSV
+          <button
+            className="button button-outline"
+            type="button"
+            onClick={exportExpenseStatementExcel}
+            disabled={exportingExpenseExcel}
+          >
+            {exportingExpenseExcel ? "Exporting..." : "Export Excel"}
           </button>
           <button className="button button-outline" type="button" onClick={printExpenseStatement}>
             Print
@@ -1784,16 +1962,17 @@ export default function Reports() {
           <div className="panel">
             <h3>Statement options</h3>
             <p className="muted-panel" style={{ marginBottom: 12 }}>
-              Select one expense category. Start and end dates are optional, but if you enter one, enter both.
+              Leave category empty to include <strong>all categories</strong>. Select one category for a single
+              section. Same item names are merged and bill numbers are combined (e.g. 810/1379).
             </p>
             <div className="form-grid">
-              <Field label="Expense Category">
+              <Field label="Expense Category (optional)">
                 <select
                   className="input"
                   value={selectedExpenseCategoryId}
                   onChange={(event) => setSelectedExpenseCategoryId(event.target.value)}
                 >
-                  <option value="">Select category</option>
+                  <option value="">All categories</option>
                   {expenseCategories.map((category) => (
                     <option key={category.id} value={category.id}>
                       {category.name}
@@ -1814,7 +1993,7 @@ export default function Reports() {
                   className="input"
                   value={expenseStatementEnd}
                   onChange={(event) => setExpenseStatementEnd(event.target.value)}
-                  placeholder="1404-01-30"
+                  placeholder="1404-12-29"
                 />
               </Field>
             </div>
@@ -1825,59 +2004,73 @@ export default function Reports() {
           {expenseStatement ? (
             <>
               <div className="stats-grid">
-                <StatCard label="Category" value={expenseStatement.category?.name || "—"} />
+                <StatCard
+                  label="Category"
+                  value={
+                    expenseStatement.filters?.all_categories
+                      ? "All categories"
+                      : expenseStatement.category?.name || "—"
+                  }
+                />
                 <StatCard label="Total Amount" value={expenseStatement.summary?.total_amount || "—"} />
-                <StatCard label="Expenses Count" value={expenseStatement.summary?.expenses_count || "—"} />
+                <StatCard label="Categories" value={expenseStatement.summary?.categories_count || "—"} />
+                <StatCard label="Expense Rows" value={expenseStatement.summary?.expenses_count || "—"} />
               </div>
 
-              <div className="panel">
-                <h3>Statement Details</h3>
-                <div className="table">
-                  <div className="table-head">
-                    <div>Field</div>
-                    <div>Value</div>
+              {(expenseStatement.sections || []).map((section) => (
+                <div className="panel" key={section.category?.id || section.category?.name}>
+                  <div className="expense-sheet-wrap">
+                    <table className="expense-sheet">
+                      <caption>{section.category?.name || "مصارف"}</caption>
+                      <thead>
+                        <tr>
+                          <th className="col-no">شماره</th>
+                          <th>اسم جنس</th>
+                          <th className="col-qty">تعداد</th>
+                          <th className="col-amount">مقدار مصرف</th>
+                          <th className="col-bill">نمبر بل</th>
+                          <th>ملاحظات</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(section.items || []).map((item) => (
+                          <tr key={`${section.category?.id}-${item.row_number}-${item.item_name || "row"}`}>
+                            <td>{item.row_number}</td>
+                            <td className="item-name">{item.item_name || "—"}</td>
+                            <td>{item.quantity || "—"}</td>
+                            <td>{item.amount}</td>
+                            <td>{item.bill_number || "—"}</td>
+                            <td className="notes">{item.notes || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td></td>
+                          <td className="item-name">جمله شد بل</td>
+                          <td></td>
+                          <td>{section.summary?.total_amount}</td>
+                          <td></td>
+                          <td></td>
+                        </tr>
+                      </tfoot>
+                    </table>
                   </div>
-                  <div className="table-row">
-                    <div>Category</div>
-                    <div>{expenseStatement.category?.name}</div>
-                  </div>
-                  <div className="table-row">
-                    <div>Start</div>
-                    <div>{expenseStatement.filters?.start || "All"}</div>
-                  </div>
-                  <div className="table-row">
-                    <div>End</div>
-                    <div>{expenseStatement.filters?.end || "All"}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="panel">
-                <h3>Expense Ledger</h3>
-                <div className="table">
-                  <div className="table-head">
-                    <div>ID</div>
-                    <div>Date</div>
-                    <div>Amount</div>
-                    <div>Paid By</div>
-                    <div>Description</div>
-                  </div>
-                  {(expenseStatement.expenses || []).map((expense) => (
-                    <div className="table-row" key={expense.id}>
-                      <div>{expense.id}</div>
-                      <div>{expense.date_shamsi}</div>
-                      <div>{expense.amount}</div>
-                      <div>{expense.paid_by}</div>
-                      <div>{expense.description || "—"}</div>
+                  {!section.items?.length ? (
+                    <div className="muted-panel" style={{ marginTop: 12 }}>
+                      No expense rows found for this category.
                     </div>
-                  ))}
+                  ) : null}
                 </div>
-                {!expenseStatement.expenses?.length ? (
-                  <div className="muted-panel" style={{ marginTop: 12 }}>
-                    No expense rows found for this statement range.
-                  </div>
-                ) : null}
-              </div>
+              ))}
+
+              {(expenseStatement.sections || []).length > 1 ? (
+                <div className="expense-grand-total">مجموعه کل: {expenseStatement.summary?.total_amount}</div>
+              ) : null}
+
+              {!expenseStatement.sections?.length ? (
+                <div className="muted-panel">No expense rows found for this statement range.</div>
+              ) : null}
             </>
           ) : null}
         </>

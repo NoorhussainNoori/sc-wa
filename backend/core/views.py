@@ -831,26 +831,105 @@ class TeacherStatementReportView(APIView):
         )
 
 
+def _join_unique_parts(values, separator="/") -> str:
+    seen = set()
+    parts = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        parts.append(text)
+    return separator.join(parts)
+
+
+def _build_expense_statement_items(expenses: list[Expense]) -> list[dict]:
+    """
+    Group expenses that share the same description into Excel-style rows.
+    Bill numbers are combined with "/" when multiple expenses merge into one row.
+    Empty descriptions stay as separate rows (not merged).
+    """
+    groups: dict[str, dict] = {}
+    order: list[str] = []
+
+    for expense in expenses:
+        description = (expense.description or "").strip()
+        if description:
+            key = f"desc:{description.casefold()}"
+            item_name = description
+        else:
+            key = f"id:{expense.id}"
+            item_name = ""
+
+        if key not in groups:
+            groups[key] = {
+                "item_name": item_name,
+                "quantity": "",
+                "amount": Decimal("0"),
+                "bill_numbers": [],
+                "notes": [],
+                "expense_ids": [],
+                "expenses_count": 0,
+            }
+            order.append(key)
+
+        group = groups[key]
+        group["amount"] += expense.amount or Decimal("0")
+        group["expenses_count"] += 1
+        group["expense_ids"].append(expense.id)
+        if not group["quantity"] and (expense.quantity or "").strip():
+            group["quantity"] = (expense.quantity or "").strip()
+        if (expense.bill_number or "").strip():
+            group["bill_numbers"].append(expense.bill_number)
+        if (expense.notes or "").strip():
+            group["notes"].append(expense.notes)
+
+    items = []
+    for index, key in enumerate(order, start=1):
+        group = groups[key]
+        items.append(
+            {
+                "row_number": index,
+                "item_name": group["item_name"],
+                "quantity": group["quantity"],
+                "amount": _money_str(group["amount"]),
+                "bill_number": _join_unique_parts(group["bill_numbers"], "/"),
+                "notes": _join_unique_parts(group["notes"], " | "),
+                "expenses_count": group["expenses_count"],
+                "expense_ids": group["expense_ids"],
+            }
+        )
+    return items
+
+
 class ExpenseCategoryStatementReportView(APIView):
     """
-    Printable per-category expense statement with optional date range.
+    Printable expense statement with optional date range.
+
+    - No category_id: all categories (one section each)
+    - With category_id: that category only
     """
 
     def get(self, request):
-        category_id = request.query_params.get("category_id")
-        if not category_id:
-            return Response({"detail": "category_id is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            category = ExpenseCategory.objects.get(pk=category_id)
-        except ExpenseCategory.DoesNotExist:
-            return Response({"detail": "Expense category not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        expense_qs = Expense.objects.select_related("category").filter(category_id=category.id).order_by("date_shamsi", "id")
-
+        category_id = (request.query_params.get("category_id") or "").strip()
         start = request.query_params.get("start")
         end = request.query_params.get("end")
         month_shamsi = request.query_params.get("month_shamsi")
+
+        expense_qs = Expense.objects.select_related("category").all().order_by(
+            "category__name", "date_shamsi", "id"
+        )
+
+        selected_category = None
+        if category_id:
+            try:
+                selected_category = ExpenseCategory.objects.get(pk=category_id)
+            except ExpenseCategory.DoesNotExist:
+                return Response({"detail": "Expense category not found."}, status=status.HTTP_404_NOT_FOUND)
+            expense_qs = expense_qs.filter(category_id=selected_category.id)
 
         if start and end:
             try:
@@ -867,24 +946,74 @@ class ExpenseCategoryStatementReportView(APIView):
             expense_qs = expense_qs.filter(date_shamsi__year=year, date_shamsi__month=month)
 
         expenses = list(expense_qs)
-        total_amount = expense_qs.aggregate(total=Sum("amount")).get("total") or Decimal("0")
+        sections = []
+        grand_total = Decimal("0")
+        grand_expense_count = 0
+        grand_item_count = 0
+
+        if selected_category:
+            category_order = [selected_category]
+        else:
+            # Keep categories that have expenses in range; preserve name order.
+            seen_ids = []
+            for expense in expenses:
+                if expense.category_id not in seen_ids:
+                    seen_ids.append(expense.category_id)
+            category_map = {
+                cat.id: cat
+                for cat in ExpenseCategory.objects.filter(id__in=seen_ids).order_by("name")
+            }
+            category_order = [category_map[cid] for cid in seen_ids if cid in category_map]
+
+        for category in category_order:
+            category_expenses = [expense for expense in expenses if expense.category_id == category.id]
+            items = _build_expense_statement_items(category_expenses)
+            section_total = sum((expense.amount or Decimal("0") for expense in category_expenses), Decimal("0"))
+            grand_total += section_total
+            grand_expense_count += len(category_expenses)
+            grand_item_count += len(items)
+            sections.append(
+                {
+                    "category": {"id": category.id, "name": category.name},
+                    "summary": {
+                        "total_amount": _money_str(section_total),
+                        "expenses_count": len(category_expenses),
+                        "items_count": len(items),
+                    },
+                    "items": items,
+                    "expenses": ExpenseSerializer(category_expenses, many=True).data,
+                }
+            )
+
+        # Back-compat flat fields when a single category is selected (or only one section).
+        flat_items = sections[0]["items"] if len(sections) == 1 else [item for section in sections for item in section["items"]]
+        flat_expenses = (
+            sections[0]["expenses"] if len(sections) == 1 else [row for section in sections for row in section["expenses"]]
+        )
 
         return Response(
             {
-                "category": {
-                    "id": category.id,
-                    "name": category.name,
-                },
+                "category": (
+                    {"id": selected_category.id, "name": selected_category.name}
+                    if selected_category
+                    else None
+                ),
                 "filters": {
                     "start": start or "",
                     "end": end or "",
                     "month_shamsi": month_shamsi or "",
+                    "category_id": category_id,
+                    "all_categories": not bool(category_id),
                 },
                 "summary": {
-                    "total_amount": _money_str(total_amount),
-                    "expenses_count": len(expenses),
+                    "total_amount": _money_str(grand_total),
+                    "expenses_count": grand_expense_count,
+                    "items_count": grand_item_count,
+                    "categories_count": len(sections),
                 },
-                "expenses": ExpenseSerializer(expenses, many=True).data,
+                "sections": sections,
+                "items": flat_items,
+                "expenses": flat_expenses,
             }
         )
 
